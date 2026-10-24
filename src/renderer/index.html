@@ -305,9 +305,14 @@
           <span class="slider-caption">Get this from your friend by having them click the "Copy Link" or "Invite Friends" button.</span>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 8px;">
-          <button id="btn-submit-join" class="btn-primary" style="flex: 1;">Connect to Server</button>
-          <button id="btn-reset-localhost" class="btn-secondary" title="Switch back to hosting on this PC">Host Local Server</button>
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+          <div style="display: flex; gap: 10px;">
+            <button id="btn-submit-join" class="btn-primary" style="flex: 1;">Connect to Server</button>
+            <button id="btn-reset-localhost" class="btn-secondary" title="Switch back to hosting on this PC">Host Local Server</button>
+          </div>
+          <button id="btn-reset-render-cloud" class="btn-primary" style="background: var(--accent-purple); width: 100%; border: 1px solid rgba(124, 58, 237, 0.5);" title="Connect to official 24/7 Render cloud">
+            ? Connect to 24/7 Render Cloud (megazacx-server.onrender.com)
+          </button>
         </div>
       </div>
     </div>
@@ -418,6 +423,10 @@
                 <input type="text" id="input-remote-url" class="setting-input" placeholder="https://megazacx-server.onrender.com">
                 <button id="btn-connect-remote" class="btn-secondary">Connect</button>
               </div>
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <button id="btn-reset-cloud-settings" class="btn-primary" style="flex: 1; background: var(--accent-purple);">? Reset to 24/7 Render Cloud</button>
+                <button id="btn-clear-host-settings" class="btn-secondary" style="flex: 1;">Clear Custom Host</button>
+              </div>
             </div>
           </div>
         </div>
@@ -432,7 +441,7 @@
   </div>
 
   <!-- Audio container for remote peer WebRTC audio tracks -->
-  <div id="remote-audio-container" style="display: none;"></div>
+  <div id="remote-audio-container" style="position: fixed; left: -9999px; top: -9999px; width: 0; height: 0; overflow: hidden;"></div>
 
   <script src="js/app.js"></script>
 </body>

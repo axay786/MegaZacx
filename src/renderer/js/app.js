@@ -46,8 +46,14 @@
   const RTC_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:global.stun.twilio.com:3478' }
-    ]
+    ],
+    iceCandidatePoolSize: 10
   };
 
   function playSound(type) {
@@ -151,6 +157,9 @@
     btnCloseInviteModal: document.getElementById('btn-close-invite-modal'),
     inviteLanInput: document.getElementById('invite-lan-input'),
     btnCopyInviteLan: document.getElementById('btn-copy-invite-lan'),
+    btnResetRenderCloud: document.getElementById('btn-reset-render-cloud'),
+    btnResetCloudSettings: document.getElementById('btn-reset-cloud-settings'),
+    btnClearHostSettings: document.getElementById('btn-clear-host-settings'),
 
     // Settings Modal
     settingsModal: document.getElementById('settings-modal'),
@@ -442,21 +451,30 @@
     };
 
     pc.ontrack = (event) => {
-      console.log("[WebRTC] Remote track received from:", peerId);
-      peerEntry.stream = event.streams[0];
+      console.log("[WebRTC] Remote track received from:", peerId, event.streams);
+      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      peerEntry.stream = stream;
 
       let audioElem = document.getElementById("audio-peer-" + peerId);
       if (!audioElem) {
         audioElem = document.createElement("audio");
         audioElem.id = "audio-peer-" + peerId;
         audioElem.autoplay = true;
+        audioElem.muted = false;
         el.remoteAudioContainer.appendChild(audioElem);
       }
-      audioElem.srcObject = event.streams[0];
+      audioElem.srcObject = stream;
+      audioElem.volume = 1.0;
       audioElem.muted = state.currentUser.isDeafened;
       peerEntry.audioElem = audioElem;
 
-      setupRemoteAudioVAD(peerId, event.streams[0]);
+      audioElem.play().then(() => {
+        console.log("[WebRTC] Audio playback started for peer:", peerId);
+      }).catch(err => {
+        console.warn("[WebRTC] Audio play error:", err);
+      });
+
+      setupRemoteAudioVAD(peerId, stream);
     };
 
     pc.onconnectionstatechange = () => {
@@ -1181,6 +1199,28 @@
       resetToLocalHost();
       closeJoinModal();
     };
+
+    const connectToRenderCloud = () => {
+      localStorage.removeItem("megazacx_server_url");
+      if (el.inputJoinAddress) el.inputJoinAddress.value = "https://megazacx-server.onrender.com";
+      if (el.inputRemoteUrl) el.inputRemoteUrl.value = "https://megazacx-server.onrender.com";
+      initSocket("https://megazacx-server.onrender.com");
+      if (el.joinServerModal) el.joinServerModal.classList.add("hidden");
+      if (el.settingsModal) el.settingsModal.classList.add("hidden");
+      showToast("? Connected to 24/7 Render Cloud Server!");
+    };
+
+    const clearCustomHost = () => {
+      localStorage.removeItem("megazacx_server_url");
+      if (el.inputJoinAddress) el.inputJoinAddress.value = "";
+      if (el.inputRemoteUrl) el.inputRemoteUrl.value = "";
+      initSocket("https://megazacx-server.onrender.com");
+      showToast("? Custom host cleared. Connected to default Cloud Server.");
+    };
+
+    if (el.btnResetRenderCloud) el.btnResetRenderCloud.onclick = connectToRenderCloud;
+    if (el.btnResetCloudSettings) el.btnResetCloudSettings.onclick = connectToRenderCloud;
+    if (el.btnClearHostSettings) el.btnClearHostSettings.onclick = clearCustomHost;
 
     // Invite Modal Handlers
     const openInviteModal = () => {

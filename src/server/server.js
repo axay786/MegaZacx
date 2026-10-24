@@ -223,8 +223,23 @@ function createServer(port = 3888) {
       io.emit('users-update', Array.from(connectedUsers.values()));
     });
 
+        socket.on('webrtc-signal', (data) => {
+      if (data && data.targetPeerId) {
+        socket.to(data.targetPeerId).emit('webrtc-signal', {
+          senderPeerId: socket.id,
+          signalType: data.signalType,
+          signalData: data.signalData
+        });
+      }
+    });
+
     socket.on('webrtc-offer', (data) => {
       if (data && data.target) {
+        socket.to(data.target).emit('webrtc-signal', {
+          senderPeerId: socket.id,
+          signalType: 'offer',
+          signalData: data.sdp
+        });
         socket.to(data.target).emit('webrtc-offer', {
           caller: socket.id,
           sdp: data.sdp
@@ -234,6 +249,11 @@ function createServer(port = 3888) {
 
     socket.on('webrtc-answer', (data) => {
       if (data && data.target) {
+        socket.to(data.target).emit('webrtc-signal', {
+          senderPeerId: socket.id,
+          signalType: 'answer',
+          signalData: data.sdp
+        });
         socket.to(data.target).emit('webrtc-answer', {
           caller: socket.id,
           sdp: data.sdp
@@ -243,6 +263,11 @@ function createServer(port = 3888) {
 
     socket.on('webrtc-ice-candidate', (data) => {
       if (data && data.target) {
+        socket.to(data.target).emit('webrtc-signal', {
+          senderPeerId: socket.id,
+          signalType: 'ice-candidate',
+          signalData: data.candidate
+        });
         socket.to(data.target).emit('webrtc-ice-candidate', {
           caller: socket.id,
           candidate: data.candidate

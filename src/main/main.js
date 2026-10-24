@@ -7,6 +7,8 @@ let serverInstance = null;
 let serverPort = 3888;
 let serverIps = [];
 
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
