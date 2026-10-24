@@ -1,0 +1,389 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MegaZacx (eZacx-Comm)</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/socket.io.min.js"></script>
+</head>
+<body>
+  <!-- Custom Cyber-Space Frameless Titlebar -->
+  <div id="titlebar" class="titlebar">
+    <div class="titlebar-drag">
+      <div class="app-branding">
+        <svg class="app-logo-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12c0 1.82.49 3.53 1.34 5L2 22l5.24-1.31C8.63 21.49 10.26 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm1 14.5h-2V15h2v1.5zm0-3.5h-2c0-3.25 3-3 3-5 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 2.5-3 2.75-3 5z"/>
+        </svg>
+        <span class="app-title">MegaZacx</span>
+        <span class="app-subtitle">eZacx-Comm</span>
+      </div>
+      <div id="server-pill" class="server-pill" title="Click to view or change Server Connection">
+        <span class="pill-dot"></span>
+        <span id="server-status-text">Initializing server...</span>
+      </div>
+    </div>
+    <div class="titlebar-controls">
+      <button id="btn-share-lan" class="titlebar-btn" title="Invite Friends / Share Connection">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+        <span>Invite Friends</span>
+      </button>
+      <button id="btn-minimize" class="titlebar-btn" title="Minimize">&#x2014;</button>
+      <button id="btn-maximize" class="titlebar-btn" title="Maximize">&#x25A2;</button>
+      <button id="btn-close" class="titlebar-btn btn-close" title="Close">&times;</button>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div class="app-container">
+    <!-- 1. Left Guilds / Servers Bar -->
+    <nav class="guilds-sidebar">
+      <div class="guild-item active" title="MegaZacx Home Guild">
+        <div class="guild-pill"></div>
+        <div class="guild-icon home-icon">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="guild-separator"></div>
+      <div class="guild-item" id="btn-add-server" title="Connect to a Friend's Server / Enter IP">
+        <div class="guild-icon add-guild">
+          <span>+</span>
+        </div>
+      </div>
+      <div class="guild-item" id="btn-quick-settings" title="Server Settings & Info">
+        <div class="guild-icon settings-guild">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+          </svg>
+        </div>
+      </div>
+    </nav>
+
+    <!-- 2. Channels Sidebar (260px) -->
+    <aside class="channels-sidebar">
+      <!-- Guild Header Banner -->
+      <div class="guild-header" id="guild-header-banner">
+        <div class="guild-title-wrap">
+          <span class="guild-title">MegaZacx Comms</span>
+          <span class="verified-badge" title="Active Guild">&#x2714;</span>
+        </div>
+        <svg class="dropdown-arrow" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M7 10l5 5 5-5z"/>
+        </svg>
+      </div>
+
+      <!-- Channels List Scroll Area -->
+      <div class="channels-scroller">
+        <!-- Text Channels Section -->
+        <div class="channel-category">
+          <div class="category-header">
+            <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            <span>TEXT CHANNELS</span>
+          </div>
+          <div id="text-channels-list" class="category-items">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Voice Channels Section -->
+        <div class="channel-category">
+          <div class="category-header">
+            <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            <span>VOICE CHANNELS</span>
+          </div>
+          <div id="voice-channels-list" class="category-items">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Connected Voice Status Panel (Always visible when in voice) -->
+      <div id="voice-connected-bar" class="voice-connected-bar hidden">
+        <div class="voice-status-info">
+          <div class="voice-status-heading">
+            <span class="rtc-signal-indicator"></span>
+            <span class="rtc-text">Voice Connected</span>
+          </div>
+          <div class="voice-channel-current">
+            <span id="current-voice-room-name">General Voice</span>
+            <span class="voice-ping-badge" id="voice-ping-badge">P2P Mesh</span>
+          </div>
+        </div>
+        <!-- Actions: Copy Link + Disconnect -->
+        <div class="voice-bar-controls">
+          <button id="btn-copy-voice-bar" class="btn-copy-voice-bar" title="Copy Voice Channel Link anytime to share with friends">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+            </svg>
+            <span id="copy-voice-bar-label">Copy Link</span>
+          </button>
+          <button id="btn-disconnect-voice" class="btn-disconnect" title="Disconnect from Voice">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- User Profile Footer Bar -->
+      <div class="user-profile-bar">
+        <div class="user-profile-left" id="btn-open-profile">
+          <div class="user-avatar-wrap">
+            <div id="user-avatar" class="user-avatar">M</div>
+            <div class="user-status-dot online"></div>
+          </div>
+          <div class="user-name-wrap">
+            <span id="user-display-name" class="user-display-name">MegaUser</span>
+            <span class="user-custom-tag">#0001</span>
+          </div>
+        </div>
+        <div class="user-profile-controls">
+          <button id="btn-toggle-mic" class="control-btn" title="Mute / Unmute Microphone">
+            <svg id="icon-mic" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+            </svg>
+          </button>
+          <button id="btn-toggle-deafen" class="control-btn" title="Deafen / Undeafen Audio">
+            <svg id="icon-deafen" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z"/>
+            </svg>
+          </button>
+          <button id="btn-open-settings" class="control-btn" title="User & Audio Settings">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 3. Main Center Chat & Voice Area -->
+    <main class="chat-area">
+      <!-- Channel Header Bar -->
+      <header class="channel-header">
+        <div class="channel-header-left">
+          <span class="channel-hash">#</span>
+          <h2 id="active-channel-name" class="channel-title">general</h2>
+          <div class="header-divider"></div>
+          <span id="active-channel-topic" class="channel-topic">Main chat room for MegaZacx</span>
+        </div>
+        <div class="channel-header-right">
+          <button id="btn-toggle-voice-stage" class="header-action-btn" title="Toggle Voice Stage Grid">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          </button>
+          <button id="btn-toggle-members" class="header-action-btn" title="Toggle Member List">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Voice Stage Grid (Displays active callers with glowing VAD speaking indicators) -->
+      <section id="voice-stage" class="voice-stage hidden">
+        <div class="voice-stage-header">
+          <div class="stage-title">
+            <span class="stage-live-dot"></span>
+            <span id="stage-room-name">Active Voice Session</span>
+          </div>
+          <div class="stage-header-actions">
+            <button id="btn-copy-stage-invite" class="btn-stage-copy" title="Copy Voice Channel Link">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+              </svg>
+              <span id="copy-stage-label">Copy Voice Invite</span>
+            </button>
+            <span class="stage-participants-count" id="stage-count">0 connected</span>
+          </div>
+        </div>
+        <div id="voice-grid-cards" class="voice-grid-cards">
+          <!-- Active voice participant cards rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- Messages Scroller -->
+      <div id="messages-container" class="messages-container">
+        <!-- Welcome banner -->
+        <div class="channel-welcome-banner">
+          <div class="welcome-hash">#</div>
+          <h1 id="welcome-channel-title">Welcome to #general!</h1>
+          <p>This is the start of the #general channel in MegaZacx.</p>
+        </div>
+        <div id="messages-list" class="messages-list">
+          <!-- Dynamic message rows -->
+        </div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="chat-input-wrapper">
+        <div class="chat-input-container">
+          <button class="input-action-btn attach-btn" title="Upload Attachment">+</button>
+          <input type="text" id="chat-input" class="chat-input" placeholder="Message #general..." maxlength="1000" autocomplete="off">
+          <button id="btn-send-message" class="input-action-btn send-btn" title="Send Message">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- 4. Right Members Sidebar -->
+    <aside id="members-sidebar" class="members-sidebar">
+      <div class="members-group-header">
+        <span>ONLINE &#x2014; </span><span id="online-members-count">1</span>
+      </div>
+      <div id="members-list" class="members-list">
+        <!-- Dynamic member cards -->
+      </div>
+    </aside>
+  </div>
+
+  <!-- Join / Connect Server Modal -->
+  <div id="join-server-modal" class="modal-overlay hidden">
+    <div class="modal-window" style="width: 480px;">
+      <div class="modal-header">
+        <h3>Connect to a MegaZacx Server</h3>
+        <button id="btn-close-join-modal" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" style="flex-direction: column; gap: 16px;">
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+          To voice chat and text with your friend, enter the Host's IP address or Server URL below.
+        </p>
+
+        <div class="setting-group">
+          <label>Host IP Address or Server URL</label>
+          <input type="text" id="input-join-address" class="setting-input" placeholder="e.g. 192.168.1.2:3888 or https://xyz.loca.lt">
+          <span class="slider-caption">Get this from your friend by having them click the "Copy Link" or "Invite Friends" button.</span>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 8px;">
+          <button id="btn-submit-join" class="btn-primary" style="flex: 1;">Connect to Server</button>
+          <button id="btn-reset-localhost" class="btn-secondary" title="Switch back to hosting on this PC">Host Local Server</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invite Friends / Connection Guide Modal -->
+  <div id="invite-modal" class="modal-overlay hidden">
+    <div class="modal-window" style="width: 540px;">
+      <div class="modal-header">
+        <h3>Invite Friends to Your Voice Room</h3>
+        <button id="btn-close-invite-modal" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" style="flex-direction: column; gap: 16px;">
+        <!-- Option 1: Same Wi-Fi / LAN -->
+        <div class="info-box" style="border-left: 3px solid var(--accent-cyan);">
+          <div style="font-weight: 700; color: var(--text-header); font-size: 14px;">1. If you & your friend are on the SAME Wi-Fi (LAN):</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Share this LAN link with your friend:</div>
+          <div class="copy-input-row" style="margin-top: 6px;">
+            <input type="text" id="invite-lan-input" class="setting-input" readonly value="http://localhost:3888">
+            <button id="btn-copy-invite-lan" class="btn-primary">Copy</button>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            Your friend opens MegaZacx, clicks the <strong>+</strong> button on the left, and pastes this address!
+          </div>
+        </div>
+
+        <!-- Option 2: Over the Internet -->
+        <div class="info-box" style="border-left: 3px solid var(--accent-primary);">
+          <div style="font-weight: 700; color: var(--text-header); font-size: 14px;">2. If your friend is at their OWN HOUSE (Over the Internet):</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Local IPs (192.168.x.x) cannot cross the internet directly. Run this 1-line command on your PC in PowerShell to create an instant free public link:</div>
+          <div style="background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 4px; margin-top: 6px; font-family: var(--font-code); font-size: 12px; color: var(--accent-cyan); user-select: all;">
+            npx localtunnel --port 3888
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            Localtunnel will output a public URL (e.g. <code>https://funny-dog-42.loca.lt</code>). Give that URL to your friend to paste into the <strong>+</strong> button!
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings & Config Modal -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3>MegaZacx Settings</h3>
+        <button id="btn-close-settings" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-tabs">
+          <button class="tab-btn active" data-tab="tab-voice">Voice & Audio</button>
+          <button class="tab-btn" data-tab="tab-profile">Profile</button>
+          <button class="tab-btn" data-tab="tab-network">Network & LAN</button>
+        </div>
+        <div class="tab-content">
+          <!-- Tab 1: Voice & Audio -->
+          <div id="tab-voice" class="tab-panel active">
+            <div class="setting-group">
+              <label>Microphone Input Device</label>
+              <select id="select-audio-input" class="setting-select"></select>
+            </div>
+            <div class="setting-group">
+              <label>Microphone Test & VU Meter</label>
+              <div class="vu-meter-bar">
+                <div id="vu-meter-fill" class="vu-meter-fill"></div>
+              </div>
+              <button id="btn-test-mic" class="btn-secondary">Test Microphone</button>
+            </div>
+            <div class="setting-group">
+              <label>Voice Activity Sensitivity (Threshold)</label>
+              <input type="range" id="slider-sensitivity" min="1" max="50" value="12" class="setting-slider">
+              <span class="slider-caption">Adjust so your cyan speaking ring activates only when talking.</span>
+            </div>
+          </div>
+
+          <!-- Tab 2: Profile -->
+          <div id="tab-profile" class="tab-panel">
+            <div class="setting-group">
+              <label>Display Nickname</label>
+              <input type="text" id="input-nickname" class="setting-input" placeholder="Enter nickname" maxlength="24">
+            </div>
+            <div class="setting-group">
+              <label>Avatar Color</label>
+              <div class="color-picker-row">
+                <div class="color-option active" data-color="#7C3AED" style="background: #7C3AED;" title="Electric Violet"></div>
+                <div class="color-option" data-color="#06B6D4" style="background: #06B6D4;" title="Cyan Glow"></div>
+                <div class="color-option" data-color="#10B981" style="background: #10B981;" title="Emerald"></div>
+                <div class="color-option" data-color="#F43F5E" style="background: #F43F5E;" title="Rose"></div>
+                <div class="color-option" data-color="#F59E0B" style="background: #F59E0B;" title="Amber"></div>
+                <div class="color-option" data-color="#38BDF8" style="background: #38BDF8;" title="Sky Blue"></div>
+              </div>
+            </div>
+            <button id="btn-save-profile" class="btn-primary">Save Profile</button>
+          </div>
+
+          <!-- Tab 3: Network & LAN -->
+          <div id="tab-network" class="tab-panel">
+            <div class="setting-group">
+              <label>Current Connection</label>
+              <div class="info-box">
+                <div>Server: <span id="net-server-status" class="highlight-green">Running</span></div>
+                <div>Connected URL: <span id="net-server-ip">http://localhost:3888</span></div>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label>Connect to Friend's IP / Remote Server</label>
+              <div class="copy-input-row">
+                <input type="text" id="input-remote-url" class="setting-input" placeholder="http://192.168.1.X:3888">
+                <button id="btn-connect-remote" class="btn-secondary">Connect</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Floating Toast Notification -->
+  <div id="app-toast" class="app-toast hidden">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--accent-cyan)"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+    <span id="toast-message">Voice link copied to clipboard!</span>
+  </div>
+
+  <!-- Audio container for remote peer WebRTC audio tracks -->
+  <div id="remote-audio-container" style="display: none;"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
