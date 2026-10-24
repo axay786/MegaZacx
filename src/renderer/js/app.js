@@ -6,7 +6,7 @@
   'use strict';
 
   // Global State
-  const DEFAULT_CLOUD_SERVER_URL = ''; // Set your 24/7 Render/Railway URL here
+  const DEFAULT_CLOUD_SERVER_URL = 'https://megazacx-server.onrender.com'; // Set your 24/7 Render/Railway URL here
 
   const state = {
     socket: null,
@@ -218,21 +218,17 @@
   }
 
   function getVoiceInviteUrl() {
-    const lanIp = (state.serverIps && state.serverIps.length > 0) ? state.serverIps[0] : null;
     const savedServer = localStorage.getItem('megazacx_server_url');
-
     if (savedServer && !savedServer.includes('localhost') && !savedServer.includes('127.0.0.1')) {
       return savedServer;
     }
-
+    if (DEFAULT_CLOUD_SERVER_URL && DEFAULT_CLOUD_SERVER_URL.trim()) {
+      return DEFAULT_CLOUD_SERVER_URL.trim();
+    }
+    const lanIp = (state.serverIps && state.serverIps.length > 0) ? state.serverIps[0] : null;
     if (lanIp) {
       return `http://${lanIp}:${state.serverPort}`;
     }
-
-    if (savedServer) {
-      return savedServer;
-    }
-
     return `http://127.0.0.1:${state.serverPort}`;
   }
 
@@ -1195,11 +1191,16 @@
           const hostIp = state.serverIps.length > 0 ? state.serverIps[0] : "127.0.0.1";
           el.inviteLanInput.value = `http://${hostIp}:${info.port}`;
 
+          const activeCloudUrl = DEFAULT_CLOUD_SERVER_URL && DEFAULT_CLOUD_SERVER_URL.trim() ? DEFAULT_CLOUD_SERVER_URL.trim() : null;
+          el.inviteLanInput.value = activeCloudUrl || `http://${state.serverIps[0] || '127.0.0.1'}:${info.port}`;
+
           const savedServer = localStorage.getItem("megazacx_server_url");
-          if (savedServer) {
+          if (savedServer && !savedServer.includes('localhost') && !savedServer.includes('127.0.0.1')) {
             initSocket(savedServer);
-          } else if (typeof DEFAULT_CLOUD_SERVER_URL === 'string' && DEFAULT_CLOUD_SERVER_URL.trim()) {
-            initSocket(DEFAULT_CLOUD_SERVER_URL.trim());
+          } else if (activeCloudUrl) {
+            initSocket(activeCloudUrl);
+          } else if (savedServer) {
+            initSocket(savedServer);
           } else {
             initSocket(`http://localhost:${info.port}`);
           }
