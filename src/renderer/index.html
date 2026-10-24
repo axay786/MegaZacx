@@ -79,8 +79,11 @@
         <!-- Text Channels Section -->
         <div class="channel-category">
           <div class="category-header">
-            <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
-            <span>TEXT CHANNELS</span>
+            <div class="category-header-title">
+              <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+              <span>TEXT CHANNELS</span>
+            </div>
+            <button id="btn-add-text-channel" class="btn-add-channel" title="Create Text Channel">+</button>
           </div>
           <div id="text-channels-list" class="category-items">
             <!-- Rendered dynamically -->
@@ -90,8 +93,11 @@
         <!-- Voice Channels Section -->
         <div class="channel-category">
           <div class="category-header">
-            <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
-            <span>VOICE CHANNELS</span>
+            <div class="category-header-title">
+              <svg class="category-arrow" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+              <span>VOICE CHANNELS</span>
+            </div>
+            <button id="btn-add-voice-channel" class="btn-add-channel" title="Create Voice Channel">+</button>
           </div>
           <div id="voice-channels-list" class="category-items">
             <!-- Rendered dynamically -->
@@ -235,6 +241,50 @@
         <!-- Dynamic member cards -->
       </div>
     </aside>
+  </div>
+
+  
+  <!-- Create Channel Modal -->
+  <div id="create-channel-modal" class="modal-overlay hidden">
+    <div class="modal-window" style="width: 440px;">
+      <div class="modal-header">
+        <h3 id="create-channel-modal-title">Create Channel</h3>
+        <button id="btn-close-create-channel" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" style="flex-direction: column; gap: 16px;">
+        <div class="channel-type-selector">
+          <label class="channel-type-option active" id="option-type-text">
+            <input type="radio" name="modal-channel-type" value="text" checked style="display: none;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M5.88 21a.5.5 0 0 1-.49-.59L6 17H2.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3.86l.71-4H3.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3.93l.6-3.41a.5.5 0 0 1 .49-.41h1a.5.5 0 0 1 .49.59L9.52 9h4l.6-3.41a.5.5 0 0 1 .49-.41h1a.5.5 0 0 1 .49.59L15.62 9H19.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-4.24l-.71 4H18.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-4.31l-.6 3.41a.5.5 0 0 1-.49.41h-1a.5.5 0 0 1-.49-.59L12.09 17H8.09l-.6 3.41a.5.5 0 0 1-.49.41h-1.12zM8.45 15h4l.71-4h-4l-.71 4z"/></svg>
+            <div class="channel-type-info">
+              <span class="type-name">Text Channel</span>
+              <span class="type-desc">Post messages, images, memes, and updates</span>
+            </div>
+          </label>
+          <label class="channel-type-option" id="option-type-voice">
+            <input type="radio" name="modal-channel-type" value="voice" style="display: none;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+            <div class="channel-type-info">
+              <span class="type-name">Voice Channel</span>
+              <span class="type-desc">Hang out with high-quality real-time voice chat</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="setting-group">
+          <label>CHANNEL NAME</label>
+          <div class="channel-input-box">
+            <span id="create-channel-prefix">#</span>
+            <input type="text" id="input-new-channel-name" class="setting-input" placeholder="new-channel" maxlength="32" autocomplete="off">
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+          <button id="btn-cancel-create-channel" class="btn-secondary">Cancel</button>
+          <button id="btn-submit-create-channel" class="btn-primary">Create Channel</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Join / Connect Server Modal -->

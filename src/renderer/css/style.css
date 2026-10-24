@@ -372,12 +372,37 @@ body {
 .category-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
   padding: 6px 8px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.8px;
   color: var(--text-muted);
+}
+
+.category-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-add-channel {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.btn-add-channel:hover {
+  color: var(--accent-cyan);
+  background-color: rgba(6, 182, 212, 0.12);
+  transform: scale(1.15);
 }
 
 .category-arrow {
@@ -1500,3 +1525,90 @@ body {
   background: var(--accent-cyan);
 }
 
+
+
+/* Create Channel Modal Styles */
+.channel-type-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.channel-type-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.channel-type-option:hover {
+  background: rgba(124, 58, 237, 0.08);
+  border-color: rgba(124, 58, 237, 0.35);
+}
+
+.channel-type-option.active {
+  background: rgba(124, 58, 237, 0.16);
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.25);
+}
+
+.channel-type-option svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+
+.channel-type-option.active svg {
+  color: var(--accent-cyan);
+}
+
+.channel-type-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.channel-type-info .type-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.channel-type-info .type-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.channel-input-box {
+  display: flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0 12px;
+}
+
+.channel-input-box span {
+  color: var(--accent-cyan);
+  font-size: 15px;
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.channel-input-box .setting-input {
+  border: none !important;
+  background: transparent !important;
+  padding: 9px 0 !important;
+  color: #fff;
+  width: 100%;
+}
+
+.channel-input-box:focus-within {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}

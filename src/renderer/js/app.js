@@ -94,6 +94,17 @@
     btnClose: document.getElementById('btn-close'),
     textChannelsList: document.getElementById('text-channels-list'),
     voiceChannelsList: document.getElementById('voice-channels-list'),
+    btnAddTextChannel: document.getElementById('btn-add-text-channel'),
+    btnAddVoiceChannel: document.getElementById('btn-add-voice-channel'),
+    createChannelModal: document.getElementById('create-channel-modal'),
+    createChannelModalTitle: document.getElementById('create-channel-modal-title'),
+    btnCloseCreateChannel: document.getElementById('btn-close-create-channel'),
+    btnCancelCreateChannel: document.getElementById('btn-cancel-create-channel'),
+    btnSubmitCreateChannel: document.getElementById('btn-submit-create-channel'),
+    optionTypeText: document.getElementById('option-type-text'),
+    optionTypeVoice: document.getElementById('option-type-voice'),
+    inputNewChannelName: document.getElementById('input-new-channel-name'),
+    createChannelPrefix: document.getElementById('create-channel-prefix'),
     voiceConnectedBar: document.getElementById('voice-connected-bar'),
     currentVoiceRoomName: document.getElementById('current-voice-room-name'),
     btnCopyVoiceBar: document.getElementById('btn-copy-voice-bar'),
@@ -293,6 +304,10 @@
         username: state.currentUser.username,
         avatarColor: state.currentUser.avatarColor
       });
+      state.socket.emit("register-user", {
+        username: state.currentUser.username,
+        avatarColor: state.currentUser.avatarColor
+      });
     });
 
     state.socket.on("init-success", (data) => {
@@ -304,6 +319,12 @@
       renderChannels();
       renderMessages();
       renderMembers();
+    });
+
+    state.socket.on("channels-updated", (channels) => {
+      state.channels = channels;
+      renderChannels();
+      showToast("? Channels updated!");
     });
 
     state.socket.on("users-update", (users) => {
@@ -1055,6 +1076,77 @@
 
     el.btnToggleVoiceStage.onclick = () => el.voiceStage.classList.toggle("hidden");
     el.btnToggleMembers.onclick = () => el.membersSidebar.classList.toggle("hidden");
+
+
+    // Create Channel Modal Handlers
+    let selectedChannelType = 'text';
+
+    const selectChannelType = (type) => {
+      selectedChannelType = type;
+      if (type === 'text') {
+        if (el.optionTypeText) el.optionTypeText.classList.add('active');
+        if (el.optionTypeVoice) el.optionTypeVoice.classList.remove('active');
+        if (el.createChannelPrefix) el.createChannelPrefix.textContent = '#';
+        if (el.inputNewChannelName) el.inputNewChannelName.placeholder = 'new-channel';
+        if (el.createChannelModalTitle) el.createChannelModalTitle.textContent = 'Create Text Channel';
+      } else {
+        if (el.optionTypeVoice) el.optionTypeVoice.classList.add('active');
+        if (el.optionTypeText) el.optionTypeText.classList.remove('active');
+        if (el.createChannelPrefix) el.createChannelPrefix.textContent = '??';
+        if (el.inputNewChannelName) el.inputNewChannelName.placeholder = 'Squad Room';
+        if (el.createChannelModalTitle) el.createChannelModalTitle.textContent = 'Create Voice Channel';
+      }
+    };
+
+    const openCreateChannelModal = (defaultType = 'text') => {
+      selectChannelType(defaultType);
+      if (el.inputNewChannelName) el.inputNewChannelName.value = '';
+      if (el.createChannelModal) el.createChannelModal.classList.remove('hidden');
+      setTimeout(() => {
+        if (el.inputNewChannelName) el.inputNewChannelName.focus();
+      }, 50);
+    };
+
+    const closeCreateChannelModal = () => {
+      if (el.createChannelModal) el.createChannelModal.classList.add('hidden');
+      if (el.inputNewChannelName) el.inputNewChannelName.value = '';
+    };
+
+    if (el.btnAddTextChannel) el.btnAddTextChannel.onclick = () => openCreateChannelModal('text');
+    if (el.btnAddVoiceChannel) el.btnAddVoiceChannel.onclick = () => openCreateChannelModal('voice');
+    if (el.btnCloseCreateChannel) el.btnCloseCreateChannel.onclick = closeCreateChannelModal;
+    if (el.btnCancelCreateChannel) el.btnCancelCreateChannel.onclick = closeCreateChannelModal;
+
+    if (el.optionTypeText) el.optionTypeText.onclick = () => selectChannelType('text');
+    if (el.optionTypeVoice) el.optionTypeVoice.onclick = () => selectChannelType('voice');
+
+    const submitCreateChannel = () => {
+      const name = el.inputNewChannelName ? el.inputNewChannelName.value.trim() : '';
+      if (!name) {
+        showToast('?? Please enter a channel name');
+        return;
+      }
+      if (state.socket) {
+        state.socket.emit('create-channel', {
+          type: selectedChannelType,
+          name: name
+        });
+        closeCreateChannelModal();
+        showToast('? Creating channel: ' + name);
+      } else {
+        showToast('?? Not connected to server');
+      }
+    };
+
+    if (el.btnSubmitCreateChannel) el.btnSubmitCreateChannel.onclick = submitCreateChannel;
+    if (el.inputNewChannelName) {
+      el.inputNewChannelName.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitCreateChannel();
+        }
+      };
+    }
 
     // Join Server Modal Handlers
     const openJoinModal = () => {

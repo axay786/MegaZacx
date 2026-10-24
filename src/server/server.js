@@ -1,8 +1,9 @@
-﻿const express = require('express');
+const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const os = require('os');
+const cors = require('cors');
 
 function getLocalIpAddresses() {
   const interfaces = os.networkInterfaces();
@@ -17,22 +18,39 @@ function getLocalIpAddresses() {
   return addresses;
 }
 
+// 1 default text channel, 1 default voice channel
 const DEFAULT_CHANNELS = {
   text: [
-    { id: 'general', name: 'general', topic: 'Welcome to MegaZacx! General conversation channel.' },
-    { id: 'gaming', name: 'gaming', topic: 'Squad up, share clips, and coordinate game lobbies.' },
-    { id: 'memes', name: 'memes', topic: 'Post memes, reaction images, and funny links.' },
-    { id: 'announcements', name: 'announcements', topic: 'MegaZacx updates and server announcements.' }
+    { id: 'general', name: 'general', topic: 'Main chat room for MegaZacx.' }
   ],
   voice: [
-    { id: 'voice-general', name: '🔊 General Voice', maxUsers: 10 },
-    { id: 'voice-squad', name: '🔊 Gaming Squad', maxUsers: 6 },
-    { id: 'voice-chill', name: '🔊 Chill Lounge', maxUsers: 8 }
+    { id: 'voice-general', name: '?? General Voice', maxUsers: 10 }
   ]
 };
 
+// In-Memory state
+const connectedUsers = new Map();
+const channelMessages = new Map();
+
+// Initialize default text channel welcome message
+channelMessages.set('general', [
+  {
+    id: 'welcome_general',
+    channelId: 'general',
+    senderId: 'system',
+    senderName: 'MegaZacx Bot',
+    avatarColor: '#7C3AED',
+    avatarInitial: 'M',
+    text: 'Welcome to #general! Start chatting or join General Voice on the left.',
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+]);
+
 function createServer(port = 3888) {
   const app = express();
+  app.use(cors({ origin: '*' }));
+  app.use(express.json());
+
   const server = http.createServer(app);
   const io = new Server(server, {
     cors: {
@@ -44,53 +62,33 @@ function createServer(port = 3888) {
   const rendererPath = path.join(__dirname, '..', 'renderer');
   app.use(express.static(rendererPath));
 
-  const connectedUsers = new Map();
-  const channelMessages = new Map();
-
-  DEFAULT_CHANNELS.text.forEach(ch => {
-    channelMessages.set(ch.id, [
-      {
-        id: 'msg_welcome_' + ch.id,
-        channelId: ch.id,
-        senderId: 'system',
-        senderName: 'MegaZacx Bot',
-        avatarColor: '#7C3AED',
-        avatarInitial: 'M',
-        text: 'Welcome to #' + ch.name + '! Start chatting or join one of the voice channels on the left.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        system: true
-      }
-    ]);
-  });
-
-  app.get('/api/status', (req, res) => {
+  app.get('/', (req, res) => {
     res.json({
       status: 'online',
-      name: 'MegaZacx Server',
-      version: '1.0.0',
-      connectedUsersCount: connectedUsers.size,
-      localIps: getLocalIpAddresses()
+      app: 'MegaZacx 24/7 Cloud Relay',
+      connectedUsers: connectedUsers.size,
+      uptime: Math.floor(process.uptime()) + 's',
+      timestamp: new Date().toISOString()
     });
+  });
+
+  app.get('/health', (req, res) => {
+    res.status(200).send('OK');
   });
 
   io.on('connection', (socket) => {
     console.log('[MegaZacx Server] Peer connected:', socket.id);
 
-    socket.on('init-user', (userData) => {
-      const username = (userData && userData.username ? userData.username.trim() : '') || 'Gamer_' + socket.id.slice(0, 4);
-      const avatarColor = (userData && userData.avatarColor) || '#7C3AED';
-      const avatarInitial = username.charAt(0).toUpperCase();
-
+    const handleUserRegistration = (userData) => {
       const user = {
         id: socket.id,
-        username,
-        avatarColor,
-        avatarInitial,
+        username: (userData && userData.username) ? userData.username : 'User_' + socket.id.slice(0, 4),
+        avatarColor: (userData && userData.avatarColor) ? userData.avatarColor : '#7C3AED',
+        avatarInitial: (userData && userData.username && userData.username.length > 0) ? userData.username[0].toUpperCase() : 'U',
         voiceChannel: null,
         isMuted: false,
         isDeafened: false,
-        isSpeaking: false,
-        joinedAt: Date.now()
+        isSpeaking: false
       };
 
       connectedUsers.set(socket.id, user);
@@ -103,6 +101,51 @@ function createServer(port = 3888) {
       });
 
       io.emit('users-update', Array.from(connectedUsers.values()));
+    };
+
+    socket.on('init-user', handleUserRegistration);
+    socket.on('register-user', handleUserRegistration);
+
+    socket.on('create-channel', (data) => {
+      if (!data || !data.name || !data.type) return;
+      const cleanRaw = data.name.trim();
+      const cleanSlug = cleanRaw.toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 32);
+      if (!cleanSlug) return;
+
+      if (data.type === 'text') {
+        const channelId = 'text-' + Date.now().toString(36) + '-' + cleanSlug;
+        const newChan = {
+          id: channelId,
+          name: cleanSlug,
+          topic: `Discussion in #${cleanSlug}`
+        };
+        DEFAULT_CHANNELS.text.push(newChan);
+        channelMessages.set(channelId, [
+          {
+            id: 'welcome_' + channelId,
+            channelId,
+            senderId: 'system',
+            senderName: 'MegaZacx Bot',
+            avatarColor: '#7C3AED',
+            avatarInitial: 'M',
+            text: `Welcome to #${cleanSlug}! Start chatting with your friends.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+        console.log('[MegaZacx Server] Created text channel:', newChan);
+      } else if (data.type === 'voice') {
+        const channelId = 'voice-' + Date.now().toString(36) + '-' + cleanSlug;
+        const displayName = cleanRaw.startsWith('??') ? cleanRaw : '?? ' + cleanRaw;
+        const newChan = {
+          id: channelId,
+          name: displayName.slice(0, 36),
+          maxUsers: 10
+        };
+        DEFAULT_CHANNELS.voice.push(newChan);
+        console.log('[MegaZacx Server] Created voice channel:', newChan);
+      }
+
+      io.emit('channels-updated', DEFAULT_CHANNELS);
     });
 
     socket.on('send-message', (data) => {
@@ -143,8 +186,6 @@ function createServer(port = 3888) {
       const targetChannelId = data.channelId;
       const oldChannelId = user.voiceChannel;
 
-      if (oldChannelId === targetChannelId) return;
-
       if (oldChannelId) {
         socket.leave(oldChannelId);
         socket.to(oldChannelId).emit('peer-left-voice', { peerId: socket.id });
@@ -154,12 +195,8 @@ function createServer(port = 3888) {
       user.isSpeaking = false;
       socket.join(targetChannelId);
 
-      const peersInRoom = [];
-      for (const [id, u] of connectedUsers.entries()) {
-        if (id !== socket.id && u.voiceChannel === targetChannelId) {
-          peersInRoom.push(u);
-        }
-      }
+      const peersInRoom = Array.from(connectedUsers.values())
+        .filter(u => u.voiceChannel === targetChannelId && u.id !== socket.id);
 
       socket.emit('voice-peers-list', {
         channelId: targetChannelId,
@@ -177,22 +214,40 @@ function createServer(port = 3888) {
       const user = connectedUsers.get(socket.id);
       if (!user || !user.voiceChannel) return;
 
-      const oldChannel = user.voiceChannel;
+      const currentChannel = user.voiceChannel;
+      socket.leave(currentChannel);
       user.voiceChannel = null;
       user.isSpeaking = false;
-      socket.leave(oldChannel);
 
-      socket.to(oldChannel).emit('peer-left-voice', { peerId: socket.id });
+      socket.to(currentChannel).emit('peer-left-voice', { peerId: socket.id });
       io.emit('users-update', Array.from(connectedUsers.values()));
     });
 
-    socket.on('webrtc-signal', (data) => {
-      if (!data || !data.targetPeerId) return;
-      io.to(data.targetPeerId).emit('webrtc-signal', {
-        senderPeerId: socket.id,
-        signalType: data.signalType,
-        signalData: data.signalData
-      });
+    socket.on('webrtc-offer', (data) => {
+      if (data && data.target) {
+        socket.to(data.target).emit('webrtc-offer', {
+          caller: socket.id,
+          sdp: data.sdp
+        });
+      }
+    });
+
+    socket.on('webrtc-answer', (data) => {
+      if (data && data.target) {
+        socket.to(data.target).emit('webrtc-answer', {
+          caller: socket.id,
+          sdp: data.sdp
+        });
+      }
+    });
+
+    socket.on('webrtc-ice-candidate', (data) => {
+      if (data && data.target) {
+        socket.to(data.target).emit('webrtc-ice-candidate', {
+          caller: socket.id,
+          candidate: data.candidate
+        });
+      }
     });
 
     socket.on('voice-state-update', (state) => {
@@ -232,10 +287,6 @@ function createServer(port = 3888) {
     server.listen(port, '0.0.0.0', () => {
       const ips = getLocalIpAddresses();
       console.log(`[MegaZacx Server] Listening on port ${port}`);
-      console.log(`[MegaZacx Server] Local Access: http://localhost:${port}`);
-      ips.forEach(ip => {
-        console.log(`[MegaZacx Server] LAN Access:   http://${ip}:${port}`);
-      });
       resolve({ server, port, ips });
     });
 
