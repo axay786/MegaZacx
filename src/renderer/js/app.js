@@ -1348,10 +1348,158 @@
     }
   }
 
+
+  // ==========================================================================
+  // MegaZacx In-App Auto-Updater Logic
+  // ==========================================================================
+  function initAutoUpdater() {
+    const banner = document.getElementById('app-update-banner');
+    const bannerMsg = document.getElementById('update-banner-message');
+    const btnUpdateNow = document.getElementById('btn-update-now');
+    const btnUpdateNowText = document.getElementById('btn-update-now-text');
+    const btnDismiss = document.getElementById('btn-dismiss-update');
+
+    const lblVersion = document.getElementById('lbl-installed-version');
+    const lblCommit = document.getElementById('lbl-installed-commit');
+    const btnCheckSettings = document.getElementById('btn-check-updates-settings');
+    const btnCheckSettingsText = document.getElementById('btn-check-updates-text');
+    const btnManualUpdate = document.getElementById('btn-manual-update');
+    const updateStatusMsg = document.getElementById('update-status-msg');
+
+    if (!window.megaZacxAPI || !window.megaZacxAPI.checkForUpdates) {
+      return;
+    }
+
+    // Populate current local version in Settings
+    if (window.megaZacxAPI.getAppVersion) {
+      window.megaZacxAPI.getAppVersion().then(info => {
+        if (info) {
+          if (lblVersion) lblVersion.textContent = 'v' + (info.version || '1.0.1');
+          if (lblCommit) lblCommit.textContent = (info.commit || '').substring(0, 7) || 'latest';
+        }
+      }).catch(() => {});
+    }
+
+    // Dismiss banner handler
+    if (btnDismiss && banner) {
+      btnDismiss.onclick = () => {
+        banner.classList.add('hidden');
+      };
+    }
+
+    // Perform Update action helper
+    async function triggerUpdate(targetButton, textElem) {
+      if (!window.megaZacxAPI.performUpdate) return;
+      if (targetButton) targetButton.disabled = true;
+      if (textElem) textElem.textContent = '? Downloading & Installing Update...';
+
+      showToast('?? Downloading update from GitHub... Please hold on!');
+
+      try {
+        const result = await window.megaZacxAPI.performUpdate();
+        if (result && result.success) {
+          if (textElem) textElem.textContent = '? Update Installed! Restarting...';
+          showToast('? MegaZacx updated! Restarting in a moment...');
+        } else {
+          if (targetButton) targetButton.disabled = false;
+          if (textElem) textElem.textContent = 'Retry Update';
+          showToast('?? Update failed: ' + (result ? result.error : 'Unknown error'));
+        }
+      } catch (err) {
+        if (targetButton) targetButton.disabled = false;
+        if (textElem) textElem.textContent = 'Retry Update';
+        showToast('?? Update error: ' + err.message);
+      }
+    }
+
+    // Click on Update Now in top banner
+    if (btnUpdateNow) {
+      btnUpdateNow.onclick = () => {
+        triggerUpdate(btnUpdateNow, btnUpdateNowText);
+      };
+    }
+
+    // Click on Manual Update button in settings
+    if (btnManualUpdate) {
+      btnManualUpdate.onclick = () => {
+        triggerUpdate(btnManualUpdate, btnManualUpdate);
+      };
+    }
+
+    // Check for updates in Settings tab
+    if (btnCheckSettings) {
+      btnCheckSettings.onclick = async () => {
+        if (btnCheckSettingsText) btnCheckSettingsText.textContent = 'Checking GitHub...';
+        btnCheckSettings.disabled = true;
+        if (updateStatusMsg) {
+          updateStatusMsg.className = 'update-status-msg info';
+          updateStatusMsg.textContent = 'Querying GitHub repository (axay786/MegaZacx)...';
+          updateStatusMsg.classList.remove('hidden');
+        }
+
+        try {
+          const res = await window.megaZacxAPI.checkForUpdates();
+          btnCheckSettings.disabled = false;
+          if (btnCheckSettingsText) btnCheckSettingsText.textContent = 'Check for Updates';
+
+          if (res && res.success) {
+            if (res.updateAvailable) {
+              if (updateStatusMsg) {
+                updateStatusMsg.className = 'update-status-msg success';
+                updateStatusMsg.textContent = '?? Update Available! New commit ' + res.latestCommit + ': "' + res.commitMessage + '"';
+              }
+              if (btnManualUpdate) btnManualUpdate.classList.remove('hidden');
+              if (banner && bannerMsg) {
+                bannerMsg.textContent = 'New update available: ' + res.commitMessage + ' (' + res.latestCommit + ')';
+                banner.classList.remove('hidden');
+              }
+            } else {
+              if (updateStatusMsg) {
+                updateStatusMsg.className = 'update-status-msg success';
+                updateStatusMsg.textContent = '? MegaZacx is up to date! (Build commit: ' + res.currentCommit + ')';
+              }
+              if (btnManualUpdate) btnManualUpdate.classList.add('hidden');
+            }
+          } else {
+            if (updateStatusMsg) {
+              updateStatusMsg.className = 'update-status-msg error';
+              updateStatusMsg.textContent = '?? Could not check updates: ' + (res ? res.error : 'Network error');
+            }
+          }
+        } catch (err) {
+          btnCheckSettings.disabled = false;
+          if (btnCheckSettingsText) btnCheckSettingsText.textContent = 'Check for Updates';
+          if (updateStatusMsg) {
+            updateStatusMsg.className = 'update-status-msg error';
+            updateStatusMsg.textContent = '?? Error checking updates: ' + err.message;
+          }
+        }
+      };
+    }
+
+    // Automatic silent background check on startup (after 2.5 seconds)
+    setTimeout(async () => {
+      try {
+        const res = await window.megaZacxAPI.checkForUpdates();
+        if (res && res.success && res.updateAvailable) {
+          console.log('[AutoUpdater] New update found:', res);
+          if (banner && bannerMsg) {
+            bannerMsg.textContent = 'New update ready: ' + res.commitMessage + ' (' + res.latestCommit + ')';
+            banner.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        console.warn('[AutoUpdater] Silent background check skipped:', err.message);
+      }
+    }, 2500);
+  }
+
   window.addEventListener("DOMContentLoaded", () => {
     updateProfileUI();
     setupEvents();
     loadAudioInputDevices();
+    initAutoUpdater();
   });
+
 
 })();

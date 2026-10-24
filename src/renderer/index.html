@@ -34,6 +34,24 @@
     </div>
   </div>
 
+  <!-- Top Floating App Update Notification Banner -->
+  <div id="app-update-banner" class="app-update-banner hidden">
+    <div class="update-banner-left">
+      <span class="update-rocket">??</span>
+      <div class="update-info">
+        <span class="update-badge">UPDATE AVAILABLE</span>
+        <span id="update-banner-message" class="update-text">A new MegaZacx update is ready!</span>
+      </div>
+    </div>
+    <div class="update-banner-actions">
+      <button id="btn-update-now" class="btn-update-now">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span id="btn-update-now-text">Update Now</span>
+      </button>
+      <button id="btn-dismiss-update" class="btn-update-dismiss" title="Dismiss for now">&times;</button>
+    </div>
+  </div>
+
   <!-- Main App Shell -->
   <div class="app-container">
     <!-- 1. Left Guilds / Servers Bar -->
@@ -366,6 +384,7 @@
           <button class="tab-btn active" data-tab="tab-voice">Voice & Audio</button>
           <button class="tab-btn" data-tab="tab-profile">Profile</button>
           <button class="tab-btn" data-tab="tab-network">Network & LAN</button>
+            <button class="tab-btn" data-tab="tab-updates">Updates & About</button>
         </div>
         <div class="tab-content">
           <!-- Tab 1: Voice & Audio -->
@@ -429,6 +448,37 @@
               </div>
             </div>
           </div>
+
+            <!-- Tab 4: Updates & About -->
+            <div id="tab-updates" class="tab-panel">
+              <div class="setting-group update-hero-card">
+                <div class="update-hero-icon">?</div>
+                <div class="update-hero-meta">
+                  <h4 class="update-hero-title">MegaZacx Auto-Updater</h4>
+                  <p class="update-hero-desc">Whenever improvements or fixes are released, MegaZacx automatically updates with 1 click. You never need to manually download or share zip folders again.</p>
+                </div>
+              </div>
+              <div class="setting-group">
+                <label>Software & Build Version</label>
+                <div class="version-info-box">
+                  <div class="version-row"><span>Installed Version:</span> <strong id="lbl-installed-version">v1.0.1</strong></div>
+                  <div class="version-row"><span>Build Commit:</span> <code id="lbl-installed-commit">4491e7e</code></div>
+                  <div class="version-row"><span>Update Channel:</span> <span class="badge-channel">Official GitHub (axay786/MegaZacx)</span></div>
+                </div>
+              </div>
+              <div class="setting-group">
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+                  <button id="btn-check-updates-settings" class="btn-primary" style="flex: 1; background: var(--accent-cyan); color: #0b1120; font-weight: 700;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                    <span id="btn-check-updates-text">Check for Updates</span>
+                  </button>
+                  <button id="btn-manual-update" class="btn-primary hidden" style="flex: 1; background: var(--accent-purple); font-weight: 700;">
+                    ?? Update & Restart Now
+                  </button>
+                </div>
+                <div id="update-status-msg" class="update-status-msg hidden"></div>
+              </div>
+            </div>
         </div>
       </div>
     </div>

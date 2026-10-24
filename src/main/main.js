@@ -1,6 +1,7 @@
 ﻿const { app, BrowserWindow, ipcMain, session, clipboard } = require('electron');
 const path = require('path');
 const { createServer, getLocalIpAddresses } = require('../server/server');
+const updater = require('./updater');
 
 let mainWindow = null;
 let serverInstance = null;
@@ -33,7 +34,6 @@ async function initServer() {
     console.error('[Main Process] Failed to launch embedded server:', err);
   }
 }
-
 
 function ensureDesktopShortcut() {
   if (process.platform !== 'win32') return;
@@ -124,6 +124,19 @@ ipcMain.handle('get-server-info', () => {
   };
 });
 
+// Auto-Updater IPC Handlers
+ipcMain.handle('check-for-updates', async () => {
+  return await updater.checkForUpdates();
+});
+
+ipcMain.handle('perform-update', async () => {
+  return await updater.performUpdate(app);
+});
+
+ipcMain.handle('get-app-version', () => {
+  return updater.getCurrentVersion();
+});
+
 ipcMain.on('window-minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });
@@ -150,7 +163,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       ensureDesktopShortcut();
-  createWindow();
+      createWindow();
     }
   });
 });
