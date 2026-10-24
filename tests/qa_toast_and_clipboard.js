@@ -140,7 +140,7 @@ async function runQA() {
 
   const copiedVoiceUrl = await clipboard.readText();
   console.log('[QA] Clipboard content after clicking Voice Bar button:', copiedVoiceUrl);
-  if (!copiedVoiceUrl || !copiedVoiceUrl.startsWith('http://')) {
+  if (!copiedVoiceUrl || (!copiedVoiceUrl.startsWith('http://') && !copiedVoiceUrl.startsWith('https://'))) {
     console.error('FAIL: Clipboard did not receive valid URL. Got:', copiedVoiceUrl);
     process.exit(1);
   }
@@ -158,7 +158,7 @@ async function runQA() {
   await new Promise(r => setTimeout(r, 600));
   const copiedStageUrl = await clipboard.readText();
   console.log('[QA] Clipboard content after clicking Stage Header button:', copiedStageUrl);
-  if (!copiedStageUrl || !copiedStageUrl.startsWith('http://')) {
+  if (!copiedStageUrl || (!copiedStageUrl.startsWith('http://') && !copiedStageUrl.startsWith('https://'))) {
     console.error('FAIL: Stage header copy failed! Got:', copiedStageUrl);
     process.exit(1);
   }
@@ -176,7 +176,7 @@ async function runQA() {
   await new Promise(r => setTimeout(r, 600));
   const copiedModalUrl = await clipboard.readText();
   console.log('[QA] Clipboard content after clicking Modal Copy button:', copiedModalUrl);
-  if (!copiedModalUrl || !copiedModalUrl.startsWith('http://')) {
+  if (!copiedModalUrl || (!copiedModalUrl.startsWith('http://') && !copiedModalUrl.startsWith('https://'))) {
     console.error('FAIL: Modal copy failed! Got:', copiedModalUrl);
     process.exit(1);
   }

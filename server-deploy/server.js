@@ -24,7 +24,7 @@ const DEFAULT_CHANNELS = {
     { id: 'general', name: 'general', topic: 'Main chat room for MegaZacx.' }
   ],
   voice: [
-    { id: 'voice-general', name: '?? General Voice', maxUsers: 10 }
+    { id: 'voice-general', name: 'General Voice', maxUsers: 10 }
   ]
 };
 
@@ -135,7 +135,7 @@ function createServer(port = 3888) {
         console.log('[MegaZacx Server] Created text channel:', newChan);
       } else if (data.type === 'voice') {
         const channelId = 'voice-' + Date.now().toString(36) + '-' + cleanSlug;
-        const displayName = cleanRaw.startsWith('??') ? cleanRaw : '?? ' + cleanRaw;
+        const displayName = cleanRaw.replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, '').trim().slice(0, 36) || cleanSlug;
         const newChan = {
           id: channelId,
           name: displayName.slice(0, 36),

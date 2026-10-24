@@ -44,7 +44,7 @@
   --font-code: "JetBrains Mono", "Consolas", monospace;
 
   --titlebar-height: 34px;
-  --guilds-width: 72px;
+  --guilds-width: 0px;
   --channels-width: 260px;
   --members-width: 240px;
 }

@@ -123,6 +123,7 @@
     iconMic: document.getElementById('icon-mic'),
     iconDeafen: document.getElementById('icon-deafen'),
     btnOpenSettings: document.getElementById('btn-open-settings'),
+    guildHeaderBanner: document.getElementById('guild-header-banner'),
     btnQuickSettings: document.getElementById('btn-quick-settings'),
     btnAddServer: document.getElementById('btn-add-server'),
     btnOpenProfile: document.getElementById('btn-open-profile'),
@@ -333,7 +334,7 @@
     state.socket.on("channels-updated", (channels) => {
       state.channels = channels;
       renderChannels();
-      showToast("? Channels updated!");
+      showToast("Channels updated!");
     });
 
     state.socket.on("users-update", (users) => {
@@ -707,7 +708,7 @@
     state.currentUser.voiceChannel = channelId;
 
     const channelObj = state.channels.voice.find(v => v.id === channelId);
-    const roomName = channelObj ? channelObj.name : "Voice Channel";
+    const roomName = channelObj ? (channelObj.name || "").replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, "").trim() : "Voice Channel";
 
     el.voiceConnectedBar.classList.remove("hidden");
     el.currentVoiceRoomName.textContent = roomName;
@@ -817,13 +818,16 @@
     (state.channels.voice || []).forEach(v => {
       const channelWrap = document.createElement("div");
 
+      // Strip any accidental '??' or emoji prefixes from name
+      const cleanVoiceName = escapeHTML((v.name || "").replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, "").trim());
+
       const btn = document.createElement("div");
       btn.className = "channel-btn" + (v.id === state.activeVoiceChannel ? " active" : "");
       btn.innerHTML = `
         <svg class="channel-icon-svg" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
         </svg>
-        <span>${v.name}</span>
+        <span>${cleanVoiceName}</span>
       `;
       btn.onclick = () => handleJoinVoice(v.id);
       channelWrap.appendChild(btn);
@@ -1177,7 +1181,8 @@
       el.joinServerModal.classList.add("hidden");
     };
 
-    el.btnAddServer.onclick = openJoinModal;
+    if (el.btnAddServer) el.btnAddServer.onclick = openJoinModal;
+    if (el.guildHeaderBanner) el.guildHeaderBanner.onclick = openJoinModal;
     el.serverPill.onclick = openJoinModal;
     el.btnCloseJoinModal.onclick = closeJoinModal;
 
@@ -1253,7 +1258,7 @@
     };
 
     el.btnOpenSettings.onclick = openSettings;
-    el.btnQuickSettings.onclick = openSettings;
+    if (el.btnQuickSettings) el.btnQuickSettings.onclick = openSettings;
     el.btnOpenProfile.onclick = openSettings;
     el.btnCloseSettings.onclick = closeSettings;
 
