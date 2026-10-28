@@ -1,4 +1,4 @@
-﻿const https = require('https');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -10,20 +10,35 @@ const GITHUB_COMMITS_API = `https://api.github.com/repos/${GITHUB_REPO}/commits/
 const GITHUB_ZIP_URL = `https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.zip`;
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
-const VERSION_FILE = path.join(ROOT_DIR, 'version.json');
+
+function getAppRootDir() {
+  const currentRoot = path.resolve(__dirname, '..', '..');
+  if (currentRoot.endsWith('.asar')) {
+    // If running inside app.asar, write to resources/app directory so Electron runs updated code
+    return path.join(path.dirname(currentRoot), 'app');
+  }
+  return currentRoot;
+}
 
 function getCurrentVersion() {
   try {
-    if (fs.existsSync(VERSION_FILE)) {
-      const raw = fs.readFileSync(VERSION_FILE, 'utf8');
+    const targetRoot = getAppRootDir();
+    const versionFile = path.join(targetRoot, 'version.json');
+    if (fs.existsSync(versionFile)) {
+      const raw = fs.readFileSync(versionFile, 'utf8');
+      return JSON.parse(raw);
+    }
+    const asarVersionFile = path.join(path.resolve(__dirname, '..', '..'), 'version.json');
+    if (fs.existsSync(asarVersionFile)) {
+      const raw = fs.readFileSync(asarVersionFile, 'utf8');
       return JSON.parse(raw);
     }
   } catch (e) {
     console.warn('[Updater] Could not read version.json:', e.message);
   }
   return {
-    version: '1.0.0',
-    commit: '4491e7ee22f08665d81b78cf39b095f120f0287d',
+    version: '1.0.2',
+    commit: '6447d7c6b8dc33e4cdd7c55862e0904e12c60d10',
     name: 'MegaZacx'
   };
 }
@@ -176,26 +191,41 @@ async function performUpdate(app) {
       throw new Error('Extracted update structure is invalid: directory not found.');
     }
 
-    console.log('[Updater] Copying updated files to app directory:', ROOT_DIR);
+    const targetRootDir = getAppRootDir();
+    console.log('[Updater] Copying updated files to app directory:', targetRootDir);
+    if (!fs.existsSync(targetRootDir)) {
+      fs.mkdirSync(targetRootDir, { recursive: true });
+    }
+
+    // If migrating from an old app.asar package, copy node_modules to resources/app
+    const currentRoot = path.resolve(__dirname, '..', '..');
+    if (currentRoot.endsWith('.asar')) {
+      const asarNodeModules = path.join(currentRoot, 'node_modules');
+      const targetNodeModules = path.join(targetRootDir, 'node_modules');
+      if (fs.existsSync(asarNodeModules) && !fs.existsSync(targetNodeModules)) {
+        console.log('[Updater] Copying node_modules from app.asar to resources/app...');
+        copyDirectoryRecursive(asarNodeModules, targetNodeModules);
+      }
+    }
 
     // Copy src directory
     const srcSource = path.join(extractedAppDir, 'src');
     if (fs.existsSync(srcSource)) {
-      copyDirectoryRecursive(srcSource, path.join(ROOT_DIR, 'src'));
+      copyDirectoryRecursive(srcSource, path.join(targetRootDir, 'src'));
     }
 
     // Copy server-deploy directory
     const serverDeploySource = path.join(extractedAppDir, 'server-deploy');
     if (fs.existsSync(serverDeploySource)) {
-      copyDirectoryRecursive(serverDeploySource, path.join(ROOT_DIR, 'server-deploy'));
+      copyDirectoryRecursive(serverDeploySource, path.join(targetRootDir, 'server-deploy'));
     }
 
     // Copy root files
-    const rootFiles = ['package.json', 'README.md'];
+    const rootFiles = ['package.json', 'README.md', 'config.json'];
     for (const file of rootFiles) {
       const filePath = path.join(extractedAppDir, file);
       if (fs.existsSync(filePath)) {
-        fs.copyFileSync(filePath, path.join(ROOT_DIR, file));
+        fs.copyFileSync(filePath, path.join(targetRootDir, file));
       }
     }
 
@@ -208,12 +238,12 @@ async function performUpdate(app) {
 
     // Update version.json
     const newVersionData = {
-      version: '1.0.1',
+      version: '1.0.2',
       commit: latestSha || 'latest',
       name: 'MegaZacx',
       updatedAt: new Date().toISOString()
     };
-    fs.writeFileSync(VERSION_FILE, JSON.stringify(newVersionData, null, 2), 'utf8');
+    fs.writeFileSync(path.join(targetRootDir, 'version.json'), JSON.stringify(newVersionData, null, 2), 'utf8');
 
     // Cleanup temp
     try {
