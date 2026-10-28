@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    MegaZacx (eZacx-Comm) — Client Application Logic
    ========================================================================== */
 
@@ -87,6 +87,11 @@
         osc.start(now);
         osc.stop(now + 0.25);
       }
+      setTimeout(() => {
+        try {
+          if (ctx.state !== 'closed') ctx.close();
+        } catch (e) {}
+      }, 350);
     } catch (e) {}
   }
 
@@ -102,6 +107,7 @@
     voiceChannelsList: document.getElementById('voice-channels-list'),
     btnAddTextChannel: document.getElementById('btn-add-text-channel'),
     btnAddVoiceChannel: document.getElementById('btn-add-voice-channel'),
+    btnRenameHeaderChannel: document.getElementById('btn-rename-header-channel'),
     createChannelModal: document.getElementById('create-channel-modal'),
     createChannelModalTitle: document.getElementById('create-channel-modal-title'),
     btnCloseCreateChannel: document.getElementById('btn-close-create-channel'),
@@ -111,6 +117,18 @@
     optionTypeVoice: document.getElementById('option-type-voice'),
     inputNewChannelName: document.getElementById('input-new-channel-name'),
     createChannelPrefix: document.getElementById('create-channel-prefix'),
+    renameChannelModal: document.getElementById('rename-channel-modal'),
+    renameChannelModalTitle: document.getElementById('rename-channel-modal-title'),
+    btnCloseRenameChannel: document.getElementById('btn-close-rename-channel'),
+    btnCancelRenameChannel: document.getElementById('btn-cancel-rename-channel'),
+    btnSubmitRenameChannel: document.getElementById('btn-submit-rename-channel'),
+    inputRenameChannelName: document.getElementById('input-rename-channel-name'),
+    renameChannelPrefix: document.getElementById('rename-channel-prefix'),
+    renameChannelHint: document.getElementById('rename-channel-hint'),
+    channelContextMenu: document.getElementById('channel-context-menu'),
+    ctxRenameChannel: document.getElementById('ctx-rename-channel'),
+    ctxDeleteChannel: document.getElementById('ctx-delete-channel'),
+    ctxMenuSeparator: document.getElementById('ctx-menu-separator'),
     voiceConnectedBar: document.getElementById('voice-connected-bar'),
     currentVoiceRoomName: document.getElementById('current-voice-room-name'),
     btnCopyVoiceBar: document.getElementById('btn-copy-voice-bar'),
@@ -323,8 +341,18 @@
     state.socket.on("init-success", (data) => {
       state.currentUser.id = data.currentUser.id;
       state.channels = data.channels;
+      applySavedChannelRenames(state.channels);
       state.allUsers = data.users;
       state.messages = data.messages || {};
+
+      // If active text channel was renamed, update header
+      const activeText = (state.channels.text || []).find(c => c.id === state.activeTextChannel);
+      if (activeText) {
+        if (el.activeChannelName) el.activeChannelName.textContent = activeText.name;
+        if (el.activeChannelTopic) el.activeChannelTopic.textContent = activeText.topic || `Discussion in #${activeText.name}`;
+        if (el.welcomeChannelTitle) el.welcomeChannelTitle.textContent = "Welcome to #" + activeText.name + "!";
+        if (el.chatInput) el.chatInput.placeholder = "Message #" + activeText.name + "...";
+      }
 
       renderChannels();
       renderMessages();
@@ -333,8 +361,40 @@
 
     state.socket.on("channels-updated", (channels) => {
       state.channels = channels;
+      applySavedChannelRenames(state.channels);
+
+      // Update active text channel header if it was renamed
+      const activeText = (channels.text || []).find(c => c.id === state.activeTextChannel);
+      if (activeText) {
+        if (el.activeChannelName) el.activeChannelName.textContent = activeText.name;
+        if (el.activeChannelTopic) el.activeChannelTopic.textContent = activeText.topic || `Discussion in #${activeText.name}`;
+        if (el.welcomeChannelTitle) el.welcomeChannelTitle.textContent = "Welcome to #" + activeText.name + "!";
+        if (el.chatInput) el.chatInput.placeholder = "Message #" + activeText.name + "...";
+      } else if (channels.text && channels.text.length > 0) {
+        switchTextChannel(channels.text[0].id);
+      }
+
+      // Update voice channel display if currently connected
+      if (state.activeVoiceChannel) {
+        const activeVoice = (channels.voice || []).find(v => v.id === state.activeVoiceChannel);
+        if (activeVoice) {
+          const cleanVoiceName = (activeVoice.name || "").replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, "").trim() || "Voice Channel";
+          if (el.currentVoiceRoomName) el.currentVoiceRoomName.textContent = cleanVoiceName;
+          if (el.stageRoomName) el.stageRoomName.textContent = cleanVoiceName;
+        } else {
+          handleLeaveVoice(false);
+          showToast("Voice channel was removed");
+        }
+      }
+
       renderChannels();
       showToast("Channels updated!");
+    });
+
+    state.socket.on("error-msg", (data) => {
+      if (data && data.message) {
+        showToast("⚠️ " + data.message);
+      }
     });
 
     state.socket.on("users-update", (users) => {
@@ -413,8 +473,9 @@
   }
 
   function resetToLocalHost() {
-    localStorage.removeItem("megazacx_server_url");
-    initSocket("http://localhost:" + state.serverPort);
+    const localUrl = "http://localhost:" + (state.serverPort || 3888);
+    localStorage.setItem("megazacx_server_url", localUrl);
+    initSocket(localUrl);
   }
 
   // WebRTC Peer Connection Core (with ICE Candidate Queue)
@@ -558,11 +619,25 @@
   function closePeer(peerId) {
     const peer = state.peers.get(peerId);
     if (peer) {
-      if (peer.pc) peer.pc.close();
+      if (peer.vadInterval) {
+        clearInterval(peer.vadInterval);
+        peer.vadInterval = null;
+      }
+      if (peer.audioCtx) {
+        try {
+          if (peer.audioCtx.state !== 'closed') peer.audioCtx.close();
+        } catch (e) {}
+        peer.audioCtx = null;
+      }
+      if (peer.pc) {
+        try { peer.pc.close(); } catch (e) {}
+      }
       if (peer.audioElem) {
-        peer.audioElem.pause();
-        peer.audioElem.srcObject = null;
-        peer.audioElem.remove();
+        try {
+          peer.audioElem.pause();
+          peer.audioElem.srcObject = null;
+          peer.audioElem.remove();
+        } catch (e) {}
       }
       state.peers.delete(peerId);
     }
@@ -570,19 +645,24 @@
 
   function setupRemoteAudioVAD(peerId, stream) {
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 128;
       source.connect(analyser);
 
       const buffer = new Uint8Array(analyser.frequencyBinCount);
       const checkInterval = setInterval(() => {
         if (!state.peers.has(peerId)) {
           clearInterval(checkInterval);
-          audioCtx.close();
+          try {
+            if (audioCtx.state !== 'closed') audioCtx.close();
+          } catch (e) {}
           return;
         }
+
+        // When document is occluded / minimized, skip DOM speaking ring updates
+        if (document.hidden) return;
 
         analyser.getByteFrequencyData(buffer);
         let sum = 0;
@@ -597,7 +677,13 @@
             updatePeerSpeakingUI(peerId, speakingNow);
           }
         }
-      }, 100);
+      }, 180);
+
+      const peer = state.peers.get(peerId);
+      if (peer) {
+        peer.audioCtx = audioCtx;
+        peer.vadInterval = checkInterval;
+      }
     } catch (e) {
       console.warn("VAD remote error:", e);
     }
@@ -636,10 +722,10 @@
 
       state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
       const source = state.audioContext.createMediaStreamSource(state.localStream);
       state.analyser = state.audioContext.createAnalyser();
-      state.analyser.fftSize = 256;
+      state.analyser.fftSize = 128;
       source.connect(state.analyser);
 
       const buffer = new Uint8Array(state.analyser.frequencyBinCount);
@@ -667,7 +753,7 @@
             setLocalSpeaking(false);
           }, 350);
         }
-      }, 80);
+      }, 150);
 
       return state.localStream;
     } catch (err) {
@@ -675,6 +761,33 @@
       alert("Microphone access is required for voice chat. Please check your system audio permissions.");
       return null;
     }
+  }
+
+  function stopLocalAudio() {
+    if (state.vadInterval) {
+      clearInterval(state.vadInterval);
+      state.vadInterval = null;
+    }
+    if (state.speakingTimeout) {
+      clearTimeout(state.speakingTimeout);
+      state.speakingTimeout = null;
+    }
+    if (state.localStream) {
+      try {
+        state.localStream.getTracks().forEach(track => {
+          try { track.stop(); } catch (e) {}
+        });
+      } catch (e) {}
+      state.localStream = null;
+    }
+    if (state.audioContext) {
+      try {
+        if (state.audioContext.state !== 'closed') state.audioContext.close();
+      } catch (e) {}
+      state.audioContext = null;
+    }
+    state.analyser = null;
+    setLocalSpeaking(false);
   }
 
   function setLocalSpeaking(speaking) {
@@ -730,7 +843,7 @@
 
     state.activeVoiceChannel = null;
     state.currentUser.voiceChannel = null;
-    setLocalSpeaking(false);
+    stopLocalAudio();
 
     for (const [id] of state.peers.entries()) {
       closePeer(id);
@@ -798,19 +911,223 @@
     renderChannels();
   }
 
+  // Channel Context Menu & Rename Modal State
+  let targetRenameChannel = { id: null, name: '', type: 'text' };
+  let activeContextMenuTarget = null;
+
+  function applySavedChannelRenames(channels) {
+    if (!channels) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem('megazacx_channel_renames') || '{}');
+      if (channels.text && Array.isArray(channels.text)) {
+        channels.text.forEach(c => {
+          if (saved[c.id]) {
+            c.name = saved[c.id];
+            if (!c.topic || c.topic.startsWith('Discussion in #') || c.topic === 'Main chat room for MegaZacx.') {
+              c.topic = `Discussion in #${saved[c.id]}`;
+            }
+          }
+        });
+      }
+      if (channels.voice && Array.isArray(channels.voice)) {
+        channels.voice.forEach(v => {
+          if (saved[v.id]) {
+            v.name = saved[v.id];
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[MegaZacx] Failed to apply saved channel renames:', e);
+    }
+  }
+
+  function openRenameChannelModal(channelId, currentName, type = 'text') {
+    closeChannelContextMenu();
+    targetRenameChannel = { id: channelId, name: currentName, type };
+    if (el.renameChannelModalTitle) {
+      el.renameChannelModalTitle.textContent = type === 'voice' ? 'Rename Voice Channel' : 'Rename Text Channel';
+    }
+    if (el.renameChannelPrefix) {
+      el.renameChannelPrefix.textContent = type === 'voice' ? '🔊' : '#';
+    }
+    if (el.renameChannelHint) {
+      el.renameChannelHint.textContent = type === 'voice'
+        ? 'Enter a descriptive name for your voice channel.'
+        : 'Channel names will be formatted with lowercase letters, numbers, and dashes.';
+    }
+    if (el.inputRenameChannelName) {
+      el.inputRenameChannelName.value = currentName;
+    }
+    if (el.renameChannelModal) {
+      el.renameChannelModal.classList.remove('hidden');
+    }
+    setTimeout(() => {
+      if (el.inputRenameChannelName) {
+        el.inputRenameChannelName.focus();
+        el.inputRenameChannelName.select();
+      }
+    }, 50);
+  }
+
+  function closeRenameChannelModal() {
+    if (el.renameChannelModal) {
+      el.renameChannelModal.classList.add('hidden');
+    }
+    targetRenameChannel = { id: null, name: '', type: 'text' };
+  }
+
+  function submitRenameChannel() {
+    if (!targetRenameChannel.id) return;
+    const rawName = el.inputRenameChannelName ? el.inputRenameChannelName.value.trim() : '';
+    if (!rawName) {
+      showToast('⚠️ Please enter a channel name');
+      return;
+    }
+
+    // Format clean name
+    let cleanName = rawName;
+    if (targetRenameChannel.type === 'text') {
+      cleanName = rawName.toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 32);
+      if (!cleanName) {
+        showToast('⚠️ Channel name must contain letters, numbers, dashes, or underscores');
+        return;
+      }
+    } else {
+      cleanName = rawName.replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, '').trim().slice(0, 36) || rawName.slice(0, 36);
+      if (!cleanName) {
+        showToast('⚠️ Please enter a valid channel name');
+        return;
+      }
+    }
+
+    // 1. Optimistically update local channel state
+    const channelList = targetRenameChannel.type === 'voice' ? state.channels.voice : state.channels.text;
+    const targetChan = (channelList || []).find(c => c.id === targetRenameChannel.id);
+    if (targetChan) {
+      targetChan.name = cleanName;
+      if (targetRenameChannel.type === 'text') {
+        targetChan.topic = `Discussion in #${cleanName}`;
+      }
+    }
+
+    // 2. Persist custom rename to localStorage so it survives app restarts and cloud server reboots
+    try {
+      const saved = JSON.parse(localStorage.getItem('megazacx_channel_renames') || '{}');
+      saved[targetRenameChannel.id] = cleanName;
+      localStorage.setItem('megazacx_channel_renames', JSON.stringify(saved));
+    } catch (e) {
+      console.warn('[MegaZacx] Failed to save channel rename to localStorage:', e);
+    }
+
+    // 3. Update active headers immediately if the renamed channel is active
+    if (targetRenameChannel.id === state.activeTextChannel) {
+      if (el.activeChannelName) el.activeChannelName.textContent = cleanName;
+      if (el.activeChannelTopic) el.activeChannelTopic.textContent = `Discussion in #${cleanName}`;
+      if (el.welcomeChannelTitle) el.welcomeChannelTitle.textContent = "Welcome to #" + cleanName + "!";
+      if (el.chatInput) el.chatInput.placeholder = "Message #" + cleanName + "...";
+    }
+
+    if (state.activeVoiceChannel && targetRenameChannel.id === state.activeVoiceChannel) {
+      if (el.currentVoiceRoomName) el.currentVoiceRoomName.textContent = cleanName;
+      if (el.stageRoomName) el.stageRoomName.textContent = cleanName;
+    }
+
+    // 4. Re-render the sidebar channels list right away
+    renderChannels();
+    closeRenameChannelModal();
+
+    // 5. Broadcast to connected server via socket (so other peers see it too if supported)
+    if (state.socket && state.socket.connected) {
+      state.socket.emit('rename-channel', {
+        channelId: targetRenameChannel.id,
+        name: cleanName,
+        type: targetRenameChannel.type
+      });
+    }
+
+    showToast(`✓ Channel renamed to "${cleanName}"`);
+  }
+
+  function openChannelContextMenu(x, y, channel, type) {
+    closeChannelContextMenu();
+    activeContextMenuTarget = { channel, type };
+
+    if (!el.channelContextMenu) return;
+
+    const menuWidth = 180;
+    const menuHeight = 110;
+    const posX = Math.max(10, Math.min(x, window.innerWidth - menuWidth - 10));
+    const posY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
+
+    el.channelContextMenu.style.left = `${posX}px`;
+    el.channelContextMenu.style.top = `${posY}px`;
+    el.channelContextMenu.classList.remove('hidden');
+
+    const list = type === 'voice' ? state.channels.voice : state.channels.text;
+    if (el.ctxDeleteChannel) {
+      if (list && list.length <= 1) {
+        el.ctxDeleteChannel.style.display = 'none';
+        if (el.ctxMenuSeparator) el.ctxMenuSeparator.style.display = 'none';
+      } else {
+        el.ctxDeleteChannel.style.display = 'flex';
+        if (el.ctxMenuSeparator) el.ctxMenuSeparator.style.display = 'block';
+      }
+    }
+  }
+
+  function closeChannelContextMenu() {
+    if (el.channelContextMenu) {
+      el.channelContextMenu.classList.add('hidden');
+    }
+    activeContextMenuTarget = null;
+  }
+
   // Rendering Functions
   function renderChannels() {
     el.textChannelsList.innerHTML = "";
     (state.channels.text || []).forEach(ch => {
       const btn = document.createElement("div");
       btn.className = "channel-btn" + (ch.id === state.activeTextChannel ? " active" : "");
-      btn.innerHTML = `
+      btn.setAttribute("data-channel-id", ch.id);
+      btn.setAttribute("data-channel-type", "text");
+      btn.setAttribute("title", `#${ch.name} (Right-click or click pencil to rename)`);
+
+      const content = document.createElement("div");
+      content.className = "channel-btn-content";
+      content.innerHTML = `
         <svg class="channel-icon-svg" viewBox="0 0 24 24" fill="currentColor">
           <path d="M5.88 21a.5.5 0 0 1-.49-.59L6 17H2.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3.86l.71-4H3.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3.93l.6-3.41a.5.5 0 0 1 .49-.41h1a.5.5 0 0 1 .49.59L9.52 9h4l.6-3.41a.5.5 0 0 1 .49-.41h1a.5.5 0 0 1 .49.59L15.62 9H19.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-4.24l-.71 4H18.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-4.31l-.6 3.41a.5.5 0 0 1-.49.41h-1a.5.5 0 0 1-.49-.59L12.09 17H8.09l-.6 3.41a.5.5 0 0 1-.49.41h-1.12zM8.45 15h4l.71-4h-4l-.71 4z"/>
         </svg>
-        <span>${ch.name}</span>
+        <span class="channel-name-text">${escapeHTML(ch.name)}</span>
       `;
+
+      const actions = document.createElement("div");
+      actions.className = "channel-actions";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn-channel-action btn-channel-edit";
+      editBtn.title = "Rename Channel";
+      editBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+        </svg>
+      `;
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        openRenameChannelModal(ch.id, ch.name, "text");
+      };
+      actions.appendChild(editBtn);
+
+      btn.appendChild(content);
+      btn.appendChild(actions);
+
       btn.onclick = () => switchTextChannel(ch.id);
+      btn.oncontextmenu = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openChannelContextMenu(e.clientX, e.clientY, ch, "text");
+      };
+
       el.textChannelsList.appendChild(btn);
     });
 
@@ -823,13 +1140,46 @@
 
       const btn = document.createElement("div");
       btn.className = "channel-btn" + (v.id === state.activeVoiceChannel ? " active" : "");
-      btn.innerHTML = `
+      btn.setAttribute("data-channel-id", v.id);
+      btn.setAttribute("data-channel-type", "voice");
+      btn.setAttribute("title", `${cleanVoiceName} (Right-click or click pencil to rename)`);
+
+      const content = document.createElement("div");
+      content.className = "channel-btn-content";
+      content.innerHTML = `
         <svg class="channel-icon-svg" viewBox="0 0 24 24" fill="currentColor">
           <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
         </svg>
-        <span>${cleanVoiceName}</span>
+        <span class="channel-name-text">${cleanVoiceName}</span>
       `;
+
+      const actions = document.createElement("div");
+      actions.className = "channel-actions";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn-channel-action btn-channel-edit";
+      editBtn.title = "Rename Channel";
+      editBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+        </svg>
+      `;
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        openRenameChannelModal(v.id, cleanVoiceName, "voice");
+      };
+      actions.appendChild(editBtn);
+
+      btn.appendChild(content);
+      btn.appendChild(actions);
+
       btn.onclick = () => handleJoinVoice(v.id);
+      btn.oncontextmenu = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openChannelContextMenu(e.clientX, e.clientY, v, "voice");
+      };
+
       channelWrap.appendChild(btn);
 
       const roomMembers = state.allUsers.filter(u => u.voiceChannel === v.id);
@@ -1114,7 +1464,7 @@
       } else {
         if (el.optionTypeVoice) el.optionTypeVoice.classList.add('active');
         if (el.optionTypeText) el.optionTypeText.classList.remove('active');
-        if (el.createChannelPrefix) el.createChannelPrefix.textContent = '??';
+        if (el.createChannelPrefix) el.createChannelPrefix.textContent = '🔊';
         if (el.inputNewChannelName) el.inputNewChannelName.placeholder = 'Squad Room';
         if (el.createChannelModalTitle) el.createChannelModalTitle.textContent = 'Create Voice Channel';
       }
@@ -1166,6 +1516,100 @@
         if (e.key === 'Enter') {
           e.preventDefault();
           submitCreateChannel();
+        }
+      };
+    }
+
+    // Rename Channel Modal Handlers
+    if (el.btnCloseRenameChannel) el.btnCloseRenameChannel.onclick = closeRenameChannelModal;
+    if (el.btnCancelRenameChannel) el.btnCancelRenameChannel.onclick = closeRenameChannelModal;
+    if (el.btnSubmitRenameChannel) el.btnSubmitRenameChannel.onclick = submitRenameChannel;
+    if (el.inputRenameChannelName) {
+      el.inputRenameChannelName.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitRenameChannel();
+        } else if (e.key === 'Escape') {
+          closeRenameChannelModal();
+        }
+      };
+    }
+
+    // Header Channel Rename Handlers
+    if (el.btnRenameHeaderChannel) {
+      el.btnRenameHeaderChannel.onclick = () => {
+        const current = (state.channels.text || []).find(c => c.id === state.activeTextChannel);
+        if (current) {
+          openRenameChannelModal(current.id, current.name, 'text');
+        }
+      };
+    }
+
+    if (el.activeChannelName) {
+      el.activeChannelName.style.cursor = 'pointer';
+      el.activeChannelName.title = 'Click to rename channel';
+      el.activeChannelName.onclick = () => {
+        const current = (state.channels.text || []).find(c => c.id === state.activeTextChannel);
+        if (current) {
+          openRenameChannelModal(current.id, current.name, 'text');
+        }
+      };
+    }
+
+    // Channel Context Menu Handlers
+    window.addEventListener('click', () => closeChannelContextMenu());
+    window.addEventListener('blur', () => closeChannelContextMenu());
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeChannelContextMenu();
+        closeRenameChannelModal();
+        closeCreateChannelModal();
+      }
+    });
+
+    if (el.ctxRenameChannel) {
+      el.ctxRenameChannel.onclick = (e) => {
+        e.stopPropagation();
+        if (activeContextMenuTarget) {
+          const { channel, type } = activeContextMenuTarget;
+          closeChannelContextMenu();
+          const currentName = type === 'voice'
+            ? (channel.name || '').replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, '').trim()
+            : channel.name;
+          openRenameChannelModal(channel.id, currentName, type);
+        }
+      };
+    }
+
+    if (el.ctxDeleteChannel) {
+      el.ctxDeleteChannel.onclick = (e) => {
+        e.stopPropagation();
+        if (activeContextMenuTarget) {
+          const { channel, type } = activeContextMenuTarget;
+          closeChannelContextMenu();
+          const displayName = type === 'voice' ? channel.name : `#${channel.name}`;
+          if (confirm(`Are you sure you want to delete ${displayName}? This cannot be undone.`)) {
+            try {
+              const saved = JSON.parse(localStorage.getItem('megazacx_channel_renames') || '{}');
+              delete saved[channel.id];
+              localStorage.setItem('megazacx_channel_renames', JSON.stringify(saved));
+            } catch (err) {}
+
+            const list = type === 'voice' ? state.channels.voice : state.channels.text;
+            const idx = (list || []).findIndex(c => c.id === channel.id);
+            if (idx !== -1 && list.length > 1) {
+              list.splice(idx, 1);
+              if (type === 'text' && state.activeTextChannel === channel.id) {
+                switchTextChannel(state.channels.text[0].id);
+              }
+              renderChannels();
+            }
+
+            if (state.socket) {
+              state.socket.emit('delete-channel', { channelId: channel.id, type });
+            }
+            showToast(`Channel ${displayName} deleted`);
+          }
         }
       };
     }
@@ -1332,12 +1776,10 @@
           el.inviteLanInput.value = activeCloudUrl || `http://${state.serverIps[0] || '127.0.0.1'}:${info.port}`;
 
           const savedServer = localStorage.getItem("megazacx_server_url");
-          if (savedServer && !savedServer.includes('localhost') && !savedServer.includes('127.0.0.1')) {
+          if (savedServer) {
             initSocket(savedServer);
           } else if (activeCloudUrl) {
             initSocket(activeCloudUrl);
-          } else if (savedServer) {
-            initSocket(savedServer);
           } else {
             initSocket(`http://localhost:${info.port}`);
           }
@@ -1351,6 +1793,31 @@
       const savedServer = localStorage.getItem("megazacx_server_url");
       initSocket(savedServer || window.location.origin);
     }
+
+    // Performance & Resource Lifecycle Invariants:
+    // Pause any non-essential renderer activities when window is blurred or occluded.
+    window.addEventListener('blur', () => {
+      document.body.classList.add('window-inactive');
+    });
+    window.addEventListener('focus', () => {
+      document.body.classList.remove('window-inactive');
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        document.body.classList.add('window-inactive');
+      } else {
+        document.body.classList.remove('window-inactive');
+      }
+    });
+
+    // Immediate cleanup on window exit / reload
+    window.addEventListener('beforeunload', () => {
+      stopLocalAudio();
+      stopMicTest();
+      for (const [id] of state.peers.entries()) {
+        closePeer(id);
+      }
+    });
   }
 
 

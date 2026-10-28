@@ -148,6 +148,90 @@ function createServer(port = 3888) {
       io.emit('channels-updated', DEFAULT_CHANNELS);
     });
 
+    const handleRenameChannel = (data) => {
+      if (!data) return;
+      const channelId = data.channelId || data.id;
+      const newNameRaw = (data.name || data.newName || '').trim();
+      if (!channelId || !newNameRaw) return;
+
+      // Check text channels
+      const textChannel = DEFAULT_CHANNELS.text.find(c => c.id === channelId);
+      if (textChannel) {
+        const cleanSlug = newNameRaw.toLowerCase().replace(/[^a-z0-9-_]/g, '-').slice(0, 32);
+        if (!cleanSlug) return;
+        const oldName = textChannel.name;
+        textChannel.name = cleanSlug;
+        if (!textChannel.topic || textChannel.topic === `Discussion in #${oldName}` || textChannel.topic === 'Main chat room for MegaZacx.') {
+          textChannel.topic = `Discussion in #${cleanSlug}`;
+        }
+        if (data.topic && typeof data.topic === 'string') {
+          textChannel.topic = data.topic.trim();
+        }
+        console.log(`[MegaZacx Server] Renamed text channel ${channelId} from '${oldName}' to '${cleanSlug}'`);
+        io.emit('channels-updated', DEFAULT_CHANNELS);
+        return;
+      }
+
+      // Check voice channels
+      const voiceChannel = DEFAULT_CHANNELS.voice.find(c => c.id === channelId);
+      if (voiceChannel) {
+        const displayName = newNameRaw.replace(/^(\?\?|\?|[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}])\s*/u, '').trim().slice(0, 36) || newNameRaw.slice(0, 36);
+        if (!displayName) return;
+        const oldName = voiceChannel.name;
+        voiceChannel.name = displayName;
+        console.log(`[MegaZacx Server] Renamed voice channel ${channelId} from '${oldName}' to '${displayName}'`);
+        io.emit('channels-updated', DEFAULT_CHANNELS);
+        return;
+      }
+    };
+
+    socket.on('rename-channel', handleRenameChannel);
+    socket.on('edit-channel', handleRenameChannel);
+
+    const handleDeleteChannel = (data) => {
+      if (!data) return;
+      const channelId = data.channelId || data.id;
+      if (!channelId) return;
+
+      const textIdx = DEFAULT_CHANNELS.text.findIndex(c => c.id === channelId);
+      if (textIdx !== -1) {
+        if (DEFAULT_CHANNELS.text.length <= 1) {
+          socket.emit('error-msg', { message: 'Cannot delete the only text channel.' });
+          return;
+        }
+        DEFAULT_CHANNELS.text.splice(textIdx, 1);
+        channelMessages.delete(channelId);
+        console.log(`[MegaZacx Server] Deleted text channel: ${channelId}`);
+        io.emit('channels-updated', DEFAULT_CHANNELS);
+        return;
+      }
+
+      const voiceIdx = DEFAULT_CHANNELS.voice.findIndex(c => c.id === channelId);
+      if (voiceIdx !== -1) {
+        if (DEFAULT_CHANNELS.voice.length <= 1) {
+          socket.emit('error-msg', { message: 'Cannot delete the only voice channel.' });
+          return;
+        }
+        for (const [uid, user] of connectedUsers.entries()) {
+          if (user.voiceChannel === channelId) {
+            user.voiceChannel = null;
+            user.isSpeaking = false;
+            const sock = io.sockets.sockets.get(uid);
+            if (sock) {
+              sock.leave(channelId);
+            }
+          }
+        }
+        DEFAULT_CHANNELS.voice.splice(voiceIdx, 1);
+        console.log(`[MegaZacx Server] Deleted voice channel: ${channelId}`);
+        io.emit('users-update', Array.from(connectedUsers.values()));
+        io.emit('channels-updated', DEFAULT_CHANNELS);
+        return;
+      }
+    };
+
+    socket.on('delete-channel', handleDeleteChannel);
+
     socket.on('send-message', (data) => {
       const user = connectedUsers.get(socket.id);
       if (!user) return;

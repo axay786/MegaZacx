@@ -1,7 +1,6 @@
 {
   "version": "1.0.2",
-  "commit": "b2db296",
+  "commit": "6447d7c6b8dc33e4cdd7c55862e0904e12c60d10",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-24T12:52:11.040Z",
-  "releaseNotes": "Clean voice channel names without broken question marks, modernized voice speaker icon, and removed redundant vertical sidebar to expand chat workspace"
+  "updatedAt": "2026-10-28T17:35:00.000Z"
 }

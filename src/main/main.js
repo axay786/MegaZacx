@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, ipcMain, session, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, session, clipboard } = require('electron');
 const path = require('path');
 const { createServer, getLocalIpAddresses } = require('../server/server');
 const updater = require('./updater');
@@ -9,6 +9,11 @@ let serverPort = 3888;
 let serverIps = [];
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-breakpad');
+app.commandLine.appendSwitch('disable-speech-api');
+app.commandLine.appendSwitch('disable-renderer-accessibility');
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -37,6 +42,7 @@ async function initServer() {
 
 function ensureDesktopShortcut() {
   if (process.platform !== 'win32') return;
+  if (app.isPackaged) return;
   try {
     const fs = require('fs');
     const desktop = app.getPath('desktop');
@@ -76,7 +82,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: true,
+      spellcheck: false
     }
   });
 

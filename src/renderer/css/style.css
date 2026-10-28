@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    MegaZacx (eZacx-Comm) — Modern Cyber-Space Design System
    Color Palette:
    - Primary Accent (Electric Violet): #7C3AED
@@ -150,13 +150,7 @@ body {
   height: 6px;
   border-radius: 50%;
   background: var(--accent-cyan);
-  box-shadow: 0 0 8px var(--accent-cyan);
-  animation: pulse-cyan 2s infinite ease-in-out;
-}
-
-@keyframes pulse-cyan {
-  0%, 100% { opacity: 0.8; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.4); }
+  box-shadow: 0 0 6px var(--accent-cyan);
 }
 
 .titlebar-controls {
@@ -419,14 +413,17 @@ body {
 .channel-btn {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
   border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
   font-size: 14px;
   font-weight: 500;
+  user-select: none;
+  position: relative;
 }
 
 .channel-btn:hover {
@@ -439,6 +436,113 @@ body {
   color: var(--text-header);
   border-left: 3px solid var(--accent-primary);
   font-weight: 600;
+}
+
+.channel-btn-content {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.channel-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.channel-btn:hover .channel-actions,
+.channel-btn:focus-within .channel-actions {
+  opacity: 1;
+}
+
+.btn-channel-action {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-channel-action:hover {
+  color: var(--text-header);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.header-channel-edit {
+  margin-left: 6px;
+  opacity: 0.6;
+}
+
+.header-channel-edit:hover {
+  opacity: 1;
+  color: var(--accent-cyan);
+}
+
+.custom-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: #18191c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 170px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.custom-context-menu.hidden {
+  display: none !important;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.context-menu-item:hover {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+
+.context-menu-item.danger {
+  color: #f87171;
+}
+
+.context-menu-item.danger:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 6px;
 }
 
 .channel-icon-svg {
@@ -483,15 +587,10 @@ body {
   transition: all 0.15s ease;
 }
 
-/* Radiant Cyan Speaking Glow Ring */
+/* Radiant Cyan Speaking Glow Ring - Hardware Accelerated */
 .voice-user-avatar.speaking {
-  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 12px var(--accent-cyan-glow);
-  animation: cyan-pulse 1s infinite alternate;
-}
-
-@keyframes cyan-pulse {
-  from { box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 8px rgba(6, 182, 212, 0.5); }
-  to { box-shadow: 0 0 0 3px var(--accent-cyan), 0 0 16px rgba(6, 182, 212, 0.9); }
+  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 10px var(--accent-cyan-glow);
+  outline: 2px solid var(--accent-cyan);
 }
 
 .voice-user-name {
@@ -677,8 +776,8 @@ body {
 }
 
 .user-avatar.speaking {
-  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 12px var(--accent-cyan-glow);
-  animation: cyan-pulse 1s infinite alternate;
+  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 10px var(--accent-cyan-glow);
+  outline: 2px solid var(--accent-cyan);
 }
 
 .user-status-dot {
@@ -1656,12 +1755,13 @@ body {
 
 .update-rocket {
   font-size: 1.25rem;
-  animation: rocketPulse 2s infinite ease-in-out;
+  display: inline-block;
+  transition: transform 0.2s ease;
 }
 
-@keyframes rocketPulse {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-2px) rotate(8deg); }
+.update-hero-card:hover .update-rocket,
+.app-update-banner:hover .update-rocket {
+  transform: translateY(-2px) rotate(8deg);
 }
 
 .update-info {
@@ -1837,4 +1937,10 @@ body {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
   color: #F87171;
+}
+
+/* Background Inactive Power Saver Mode */
+body.window-inactive * {
+  animation-play-state: paused !important;
+  transition: none !important;
 }
