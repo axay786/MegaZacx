@@ -1,4 +1,4 @@
-﻿const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 contextBridge.exposeInMainWorld('megaZacxAPI', {
   isElectron: true,
@@ -24,5 +24,7 @@ contextBridge.exposeInMainWorld('megaZacxAPI', {
   },
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   performUpdate: () => ipcRenderer.invoke('perform-update'),
-  getAppVersion: () => ipcRenderer.invoke('get-app-version')
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  setCloseToTray: (enabled) => ipcRenderer.send('set-close-to-tray', enabled),
+  getCloseToTray: () => ipcRenderer.invoke('get-close-to-tray')
 });

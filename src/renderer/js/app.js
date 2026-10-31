@@ -232,7 +232,13 @@
     btnContinueGuest: document.getElementById('btn-continue-guest'),
     profileAccountTitle: document.getElementById('profile-account-title'),
     profileAccountType: document.getElementById('profile-account-type'),
-    btnOpenAuthFromSettings: document.getElementById('btn-open-auth-from-settings')
+    btnOpenAuthFromSettings: document.getElementById('btn-open-auth-from-settings'),
+
+    // Window & System Tray Settings Elements
+    selectCloseAction: document.getElementById('select-close-action'),
+    trayStatusTitle: document.getElementById('tray-status-title'),
+    trayStatusDesc: document.getElementById('tray-status-desc'),
+    trayStatusBadge: document.getElementById('tray-status-badge')
   };
 
   function showToast(msg) {
@@ -2495,6 +2501,52 @@
       state.vadThreshold = parseInt(e.target.value, 10);
       localStorage.setItem("megazacx_vad_threshold", state.vadThreshold);
     };
+
+    // Close Action & System Tray Preferences
+    function updateCloseBehaviorUI(action) {
+      const isTray = action === "tray";
+      if (el.selectCloseAction) el.selectCloseAction.value = action;
+      if (el.trayStatusTitle) {
+        el.trayStatusTitle.textContent = isTray ? "Minimize to Tray" : "Close Completely";
+      }
+      if (el.trayStatusDesc) {
+        el.trayStatusDesc.textContent = isTray
+          ? "Keeps MegaZacx running in the background tray so you stay connected to voice and receive messages."
+          : "Exits MegaZacx and stops all background connections when closed (Default).";
+      }
+      if (el.trayStatusBadge) {
+        if (isTray) {
+          el.trayStatusBadge.textContent = "Tray Active";
+          el.trayStatusBadge.style.color = "#34D399";
+          el.trayStatusBadge.style.background = "rgba(52, 211, 153, 0.15)";
+          el.trayStatusBadge.style.border = "1px solid rgba(52, 211, 153, 0.3)";
+        } else {
+          el.trayStatusBadge.textContent = "Exit on Close (Default)";
+          el.trayStatusBadge.style.color = "#F87171";
+          el.trayStatusBadge.style.background = "rgba(239, 68, 68, 0.15)";
+          el.trayStatusBadge.style.border = "1px solid rgba(239, 68, 68, 0.3)";
+        }
+      }
+    }
+
+    const savedCloseAction = localStorage.getItem("megazacx_close_action") || "close"; // Default: close completely
+    updateCloseBehaviorUI(savedCloseAction);
+    if (window.megaZacxAPI && typeof window.megaZacxAPI.setCloseToTray === "function") {
+      window.megaZacxAPI.setCloseToTray(savedCloseAction === "tray");
+    }
+
+    if (el.selectCloseAction) {
+      el.selectCloseAction.onchange = (e) => {
+        const val = e.target.value;
+        localStorage.setItem("megazacx_close_action", val);
+        updateCloseBehaviorUI(val);
+        const isTray = val === "tray";
+        if (window.megaZacxAPI && typeof window.megaZacxAPI.setCloseToTray === "function") {
+          window.megaZacxAPI.setCloseToTray(isTray);
+        }
+        showToast(isTray ? "MegaZacx will minimize to System Tray on close." : "MegaZacx will exit completely on close.");
+      };
+    }
 
     el.btnConnectRemote.onclick = () => {
       const target = el.inputRemoteUrl.value.trim();

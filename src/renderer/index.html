@@ -406,8 +406,9 @@
         <div class="settings-tabs">
           <button class="tab-btn active" data-tab="tab-voice">Voice & Audio</button>
           <button class="tab-btn" data-tab="tab-profile">Profile</button>
+          <button class="tab-btn" data-tab="tab-system">Window & Tray</button>
           <button class="tab-btn" data-tab="tab-network">Network & LAN</button>
-            <button class="tab-btn" data-tab="tab-updates">Updates & About</button>
+          <button class="tab-btn" data-tab="tab-updates">Updates & About</button>
         </div>
         <div class="tab-content">
           <!-- Tab 1: Voice & Audio -->
@@ -466,6 +467,29 @@
               </div>
             </div>
             <button id="btn-save-profile" class="btn-primary">Save Profile</button>
+          </div>
+
+          <!-- Tab: Window & Tray Settings -->
+          <div id="tab-system" class="tab-panel">
+            <div class="setting-group">
+              <label for="select-close-action">Window Close Action</label>
+              <select id="select-close-action" class="setting-select">
+                <option value="close" selected>Close Completely (Exit Application) — Default</option>
+                <option value="tray">Minimize to System Tray (Keep running in background)</option>
+              </select>
+              <span class="slider-caption">Choose what happens when you trigger the close action (clicking [X] or pressing Alt+F4). By default, MegaZacx closes completely. When set to tray, it minimizes to your taskbar notification area so you never miss voice calls.</span>
+            </div>
+
+            <div class="setting-group">
+              <label>Current Status</label>
+              <div class="info-box" style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                  <div style="font-weight: 700; color: #fff;" id="tray-status-title">Close Completely</div>
+                  <div style="font-size: 12px; color: var(--text-muted);" id="tray-status-desc">Exits MegaZacx and stops all background connections when closed (Default).</div>
+                </div>
+                <span id="tray-status-badge" class="badge-channel" style="background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3);">Exit on Close</span>
+              </div>
+            </div>
           </div>
 
           <!-- Tab 3: Network & LAN -->

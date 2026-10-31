@@ -1,7 +1,7 @@
 {
-  "version": "1.0.4",
-  "commit": "a230637",
+  "version": "1.0.5",
+  "commit": "806a870",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-31T10:56:00.000Z",
-  "releaseNotes": "Multi-device persistent user identities, strict case-insensitive duplicate username validation, secure password hashing, and 1-click multi-account switching"
+  "updatedAt": "2026-10-31T11:17:00.000Z",
+  "releaseNotes": "User configurable window close action: choose between Close Completely (Default) and Minimize to System Tray with background taskbar restoration"
 }

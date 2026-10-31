@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, session, clipboard, Tray, Menu } = require('electron');
 const path = require('path');
 const { createServer, getLocalIpAddresses } = require('../server/server');
 const updater = require('./updater');
@@ -7,6 +7,9 @@ let mainWindow = null;
 let serverInstance = null;
 let serverPort = 3888;
 let serverIps = [];
+let tray = null;
+let closeToTray = false; // Default: close completely (do not minimize to tray)
+let isQuitting = false;
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('enable-zero-copy');
@@ -22,6 +25,7 @@ if (!gotTheLock) {
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
+      if (!mainWindow.isVisible()) mainWindow.show();
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
@@ -66,6 +70,56 @@ function ensureDesktopShortcut() {
   }
 }
 
+function createTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, '..', 'renderer', 'assets', 'icon.ico');
+  try {
+    tray = new Tray(iconPath);
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Open MegaZacx',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit MegaZacx',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ]);
+
+    tray.setToolTip('MegaZacx (Voice & Text)');
+    tray.setContextMenu(contextMenu);
+
+    tray.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.focus();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    });
+
+    tray.on('double-click', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  } catch (err) {
+    console.warn('[Main Process] Failed to initialize system tray icon:', err.message);
+  }
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, '..', 'renderer', 'assets', 'icon.ico');
 
@@ -105,6 +159,14 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && closeToTray) {
+      event.preventDefault();
+      mainWindow.hide();
+      return false;
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -146,6 +208,18 @@ ipcMain.handle('get-app-version', () => {
   return updater.getCurrentVersion();
 });
 
+// Close Action & System Tray IPC Handlers
+ipcMain.on('set-close-to-tray', (event, enabled) => {
+  closeToTray = Boolean(enabled);
+  if (closeToTray && !tray) {
+    createTray();
+  }
+});
+
+ipcMain.handle('get-close-to-tray', () => {
+  return closeToTray;
+});
+
 ipcMain.on('window-minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });
@@ -161,7 +235,21 @@ ipcMain.on('window-maximize', () => {
 });
 
 ipcMain.on('window-close', () => {
-  if (mainWindow) mainWindow.close();
+  if (mainWindow) {
+    if (closeToTray && !isQuitting) {
+      mainWindow.hide();
+    } else {
+      mainWindow.close();
+    }
+  }
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
 app.whenReady().then(async () => {
@@ -178,7 +266,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
+  if (!closeToTray || isQuitting) {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
   }
 });
