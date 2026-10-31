@@ -413,8 +413,16 @@
           <!-- Tab 1: Voice & Audio -->
           <div id="tab-voice" class="tab-panel active">
             <div class="setting-group">
-              <label>Microphone Input Device</label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin: 0;">Microphone Input Device</label>
+                <button id="btn-refresh-audio-devices" class="btn-text-small" title="Scan for newly connected microphones">? Scan Devices</button>
+              </div>
               <select id="select-audio-input" class="setting-select"></select>
+              <div id="mic-device-status" class="device-status-caption">Detecting audio devices...</div>
+            </div>
+            <div class="setting-group">
+              <label>Audio Output Device (Headphones / Speakers)</label>
+              <select id="select-audio-output" class="setting-select"></select>
             </div>
             <div class="setting-group">
               <label>Microphone Test & VU Meter</label>

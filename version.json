@@ -1,6 +1,7 @@
 {
-  "version": "1.0.2",
-  "commit": "6447d7c6b8dc33e4cdd7c55862e0904e12c60d10",
+  "version": "1.0.3",
+  "commit": "29c9a37",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-28T17:35:00.000Z"
+  "updatedAt": "2026-10-31T06:25:43.012Z",
+  "releaseNotes": "Multi-device voice input detection, dynamic hot-swapping, fail-safe audio stream resolution, and audio output routing"
 }

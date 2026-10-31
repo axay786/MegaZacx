@@ -89,15 +89,16 @@ function createWindow() {
   });
 
   // Grant microphone and audio capture automatically
+  // Grant microphone, media, and speaker selection automatically
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    if (permission === 'media' || permission === 'mediaKeySystem' || permission === 'audio-capture') {
+    if (permission === 'media' || permission === 'mediaKeySystem' || permission === 'audio-capture' || permission === 'microphone' || permission === 'speaker-selection') {
       return callback(true);
     }
     callback(false);
   });
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    if (permission === 'media' || permission === 'mediaKeySystem' || permission === 'audio-capture') {
+    if (permission === 'media' || permission === 'mediaKeySystem' || permission === 'audio-capture' || permission === 'microphone' || permission === 'speaker-selection') {
       return true;
     }
     return false;

@@ -27,6 +27,10 @@
     messages: {},
     peers: new Map(), // peerId -> { pc, stream, audioElem, isSpeaking, isMuted, isDeafened, candidateQueue }
     localStream: null,
+    selectedAudioInput: localStorage.getItem('megazacx_selected_mic') || '',
+    selectedAudioOutput: localStorage.getItem('megazacx_selected_output') || '',
+    availableAudioInputs: [],
+    availableAudioOutputs: [],
     audioContext: null,
     analyser: null,
     vadInterval: null,
@@ -184,6 +188,9 @@
     settingsModal: document.getElementById('settings-modal'),
     btnCloseSettings: document.getElementById('btn-close-settings'),
     selectAudioInput: document.getElementById('select-audio-input'),
+    selectAudioOutput: document.getElementById('select-audio-output'),
+    micDeviceStatus: document.getElementById('mic-device-status'),
+    btnRefreshAudioDevices: document.getElementById('btn-refresh-audio-devices'),
     vuMeterFill: document.getElementById('vu-meter-fill'),
     btnTestMic: document.getElementById('btn-test-mic'),
     sliderSensitivity: document.getElementById('slider-sensitivity'),
@@ -528,6 +535,9 @@
       audioElem.srcObject = stream;
       audioElem.volume = 1.0;
       audioElem.muted = state.currentUser.isDeafened;
+      if (state.selectedAudioOutput && typeof audioElem.setSinkId === 'function') {
+        audioElem.setSinkId(state.selectedAudioOutput).catch(() => {});
+      }
       peerEntry.audioElem = audioElem;
 
       audioElem.play().then(() => {
@@ -702,64 +712,197 @@
     }
   }
 
-  // Local Voice Capture & VAD
-  async function startLocalAudio() {
-    if (state.localStream) return state.localStream;
+  // Bulletproof Multi-Device Microphone Stream Resolution
+  async function getMicrophoneStream(preferredDeviceId) {
+    const baseAudioConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    };
 
-    try {
-      const constraints = {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+    // Strategy 1: Request preferred device using { ideal: preferredDeviceId }
+    // (Never use { exact: ... } which causes OverconstrainedError on device change or Windows default)
+    if (preferredDeviceId && preferredDeviceId !== 'default' && preferredDeviceId !== 'communications') {
+      try {
+        const constraints = {
+          audio: {
+            ...baseAudioConstraints,
+            deviceId: { ideal: preferredDeviceId }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (stream && stream.getAudioTracks().length > 0) {
+          console.log("[Audio] Acquired preferred microphone stream:", preferredDeviceId);
+          return stream;
         }
-      };
+      } catch (err) {
+        console.warn("[Audio] Could not open preferred mic via ideal constraint, trying default:", err);
+      }
+    }
 
-      const selectedMic = el.selectAudioInput.value;
-      if (selectedMic) {
-        constraints.audio.deviceId = { exact: selectedMic };
+    // Strategy 2: Enhanced default audio
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: baseAudioConstraints
+      });
+      if (stream && stream.getAudioTracks().length > 0) {
+        console.log("[Audio] Acquired enhanced default microphone stream");
+        return stream;
+      }
+    } catch (err) {
+      console.warn("[Audio] Enhanced default audio failed, trying basic audio:", err);
+    }
+
+    // Strategy 3: Basic unconstrained audio
+    return await navigator.mediaDevices.getUserMedia({ audio: true });
+  }
+
+  function setupLocalVAD() {
+    if (!state.localStream) return;
+
+    if (state.audioContext) {
+      try {
+        if (state.audioContext.state !== 'closed') state.audioContext.close();
+      } catch (e) {}
+    }
+
+    state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    const source = state.audioContext.createMediaStreamSource(state.localStream);
+    state.analyser = state.audioContext.createAnalyser();
+    state.analyser.fftSize = 128;
+    source.connect(state.analyser);
+
+    const buffer = new Uint8Array(state.analyser.frequencyBinCount);
+
+    if (state.vadInterval) clearInterval(state.vadInterval);
+    state.vadInterval = setInterval(() => {
+      if (!state.localStream || state.currentUser.isMuted) {
+        if (state.currentUser.isSpeaking) {
+          setLocalSpeaking(false);
+        }
+        return;
       }
 
-      state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      state.analyser.getByteFrequencyData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+      const avg = sum / buffer.length;
 
-      state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-      const source = state.audioContext.createMediaStreamSource(state.localStream);
-      state.analyser = state.audioContext.createAnalyser();
-      state.analyser.fftSize = 128;
-      source.connect(state.analyser);
-
-      const buffer = new Uint8Array(state.analyser.frequencyBinCount);
-
-      if (state.vadInterval) clearInterval(state.vadInterval);
-      state.vadInterval = setInterval(() => {
-        if (!state.localStream || state.currentUser.isMuted) {
-          if (state.currentUser.isSpeaking) {
-            setLocalSpeaking(false);
-          }
-          return;
+      if (avg >= state.vadThreshold) {
+        if (!state.currentUser.isSpeaking) {
+          setLocalSpeaking(true);
         }
+        if (state.speakingTimeout) clearTimeout(state.speakingTimeout);
+        state.speakingTimeout = setTimeout(() => {
+          setLocalSpeaking(false);
+        }, 350);
+      }
+    }, 150);
+  }
 
-        state.analyser.getByteFrequencyData(buffer);
-        let sum = 0;
-        for (let i = 0; i < buffer.length; i++) sum += buffer[i];
-        const avg = sum / buffer.length;
+  // Local Voice Capture & VAD with Multi-Device Support
+  async function startLocalAudio() {
+    if (state.localStream && state.localStream.active && state.localStream.getAudioTracks().some(t => t.readyState === 'live')) {
+      return state.localStream;
+    }
 
-        if (avg >= state.vadThreshold) {
-          if (!state.currentUser.isSpeaking) {
-            setLocalSpeaking(true);
+    try {
+      const selectedMic = el.selectAudioInput ? el.selectAudioInput.value : (localStorage.getItem('megazacx_selected_mic') || '');
+      state.localStream = await getMicrophoneStream(selectedMic);
+
+      if (!state.localStream) {
+        throw new Error("No active audio stream could be captured");
+      }
+
+      // Ensure initial track mute state matches currentUser.isMuted
+      state.localStream.getAudioTracks().forEach(track => {
+        track.enabled = !state.currentUser.isMuted;
+      });
+
+      setupLocalVAD();
+
+      // Ensure any existing peers in state.peers receive the newly acquired audio track
+      state.peers.forEach((peerEntry, peerId) => {
+        if (peerEntry.pc) {
+          const track = state.localStream.getAudioTracks()[0];
+          const senders = peerEntry.pc.getSenders();
+          const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+          if (audioSender && track) {
+            audioSender.replaceTrack(track).catch(e => console.warn('[WebRTC] replaceTrack error for peer:', peerId, e));
+          } else if (track) {
+            try {
+              peerEntry.pc.addTrack(track, state.localStream);
+            } catch (e) {}
           }
-          if (state.speakingTimeout) clearTimeout(state.speakingTimeout);
-          state.speakingTimeout = setTimeout(() => {
-            setLocalSpeaking(false);
-          }, 350);
         }
-      }, 150);
+      });
 
       return state.localStream;
     } catch (err) {
       console.error("[Audio] Could not access microphone:", err);
-      alert("Microphone access is required for voice chat. Please check your system audio permissions.");
+      showToast("?? Could not access microphone. Please check system permissions.");
       return null;
+    }
+  }
+
+  // Live Hot-Swapping of Voice Input Device
+  async function switchLocalAudioDevice(newDeviceId) {
+    localStorage.setItem('megazacx_selected_mic', newDeviceId || '');
+    state.selectedAudioInput = newDeviceId || '';
+
+    // If microphone test is active in settings, immediately restart test with new device
+    if (state.isTestingMic) {
+      await startMicTest();
+    }
+
+    // If currently connected to a voice channel, hot-swap the stream & WebRTC tracks
+    if (state.activeVoiceChannel) {
+      try {
+        const newStream = await getMicrophoneStream(newDeviceId);
+        if (!newStream) return;
+
+        const newTrack = newStream.getAudioTracks()[0];
+        if (newTrack) {
+          newTrack.enabled = !state.currentUser.isMuted;
+        }
+
+        // Seamlessly update all active WebRTC peer connections
+        for (const [peerId, peerEntry] of state.peers.entries()) {
+          if (peerEntry.pc) {
+            const senders = peerEntry.pc.getSenders();
+            const audioSender = senders.find(s => s.track && s.track.kind === 'audio') || senders[0];
+            if (audioSender && newTrack) {
+              try {
+                await audioSender.replaceTrack(newTrack);
+                console.log('[WebRTC] Replaced audio track for peer:', peerId);
+              } catch (e) {
+                console.warn('[WebRTC] Error replacing track for peer:', peerId, e);
+              }
+            } else if (newTrack) {
+              try {
+                peerEntry.pc.addTrack(newTrack, newStream);
+              } catch (e) {}
+            }
+          }
+        }
+
+        // Stop old stream
+        if (state.localStream) {
+          try {
+            state.localStream.getTracks().forEach(t => t.stop());
+          } catch (e) {}
+        }
+
+        state.localStream = newStream;
+        setupLocalVAD();
+
+        const selectedOption = el.selectAudioInput ? el.selectAudioInput.options[el.selectAudioInput.selectedIndex] : null;
+        const micLabel = selectedOption ? selectedOption.textContent : "Microphone";
+        showToast("? Switched to " + micLabel);
+      } catch (err) {
+        console.error("[Audio] Failed to switch microphone device:", err);
+        showToast("?? Failed to switch microphone: " + err.message);
+      }
     }
   }
 
@@ -1341,28 +1484,144 @@
     el.chatInput.focus();
   }
 
-  async function loadAudioInputDevices() {
+  // Enhanced Device Enumeration with Permission Probing and Deduplication
+  async function loadAudioInputDevices(forceProbe = false) {
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      el.selectAudioInput.innerHTML = "";
-      const audioInputs = devices.filter(d => d.kind === "audioinput");
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+        if (el.micDeviceStatus) {
+          el.micDeviceStatus.textContent = "Media devices not supported in this environment";
+          el.micDeviceStatus.className = "device-status-caption error";
+        }
+        return;
+      }
 
-      if (audioInputs.length === 0) {
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "Default Microphone";
-        el.selectAudioInput.appendChild(opt);
-      } else {
-        audioInputs.forEach((d, idx) => {
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      let audioInputs = devices.filter(d => d.kind === "audioinput");
+
+      // In Chromium, device labels can be blank "" until getUserMedia has been invoked once
+      const needsProbe = forceProbe || (audioInputs.length > 0 && audioInputs.some(d => !d.label));
+      if (needsProbe) {
+        try {
+          const probeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          probeStream.getTracks().forEach(t => t.stop());
+          devices = await navigator.mediaDevices.enumerateDevices();
+          audioInputs = devices.filter(d => d.kind === "audioinput");
+        } catch (probeErr) {
+          console.warn("[Audio] Device label probe getUserMedia skipped or denied:", probeErr);
+        }
+      }
+
+      const audioOutputs = devices.filter(d => d.kind === "audiooutput");
+      state.availableAudioInputs = audioInputs;
+      state.availableAudioOutputs = audioOutputs;
+
+      // 1. Populate Microphone Dropdown
+      if (el.selectAudioInput) {
+        el.selectAudioInput.innerHTML = "";
+
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Default Microphone (System Default)";
+        el.selectAudioInput.appendChild(defaultOpt);
+
+        const seenLabels = new Set();
+        const validInputs = audioInputs.filter(d => {
+          if (d.deviceId === 'default' || d.deviceId === 'communications') return false;
+          const key = (d.label || d.deviceId).toLowerCase();
+          if (seenLabels.has(key)) return false;
+          seenLabels.add(key);
+          return true;
+        });
+
+        if (validInputs.length > 0) {
+          validInputs.forEach((d, idx) => {
+            const opt = document.createElement("option");
+            opt.value = d.deviceId;
+            opt.textContent = d.label || `Microphone ${idx + 1}`;
+            el.selectAudioInput.appendChild(opt);
+          });
+        } else {
+          audioInputs.forEach((d, idx) => {
+            if (d.deviceId !== 'communications') {
+              const opt = document.createElement("option");
+              opt.value = d.deviceId;
+              opt.textContent = d.label || `Microphone ${idx + 1}`;
+              el.selectAudioInput.appendChild(opt);
+            }
+          });
+        }
+
+        // Restore saved preference if device is still connected
+        const savedMic = localStorage.getItem('megazacx_selected_mic') || '';
+        const matchingOpt = Array.from(el.selectAudioInput.options).find(o => o.value === savedMic);
+        if (matchingOpt) {
+          el.selectAudioInput.value = savedMic;
+        } else {
+          el.selectAudioInput.value = "";
+        }
+
+        if (el.micDeviceStatus) {
+          const count = validInputs.length || audioInputs.length;
+          el.micDeviceStatus.textContent = count > 0
+            ? `? ${count} input device${count > 1 ? 's' : ''} detected & ready`
+            : "?? No microphone detected. Please connect an audio input device.";
+          el.micDeviceStatus.className = count > 0 ? "device-status-caption ready" : "device-status-caption error";
+        }
+      }
+
+      // 2. Populate Audio Output Dropdown (Headphones / Speakers)
+      if (el.selectAudioOutput) {
+        el.selectAudioOutput.innerHTML = "";
+        const defaultOutOpt = document.createElement("option");
+        defaultOutOpt.value = "";
+        defaultOutOpt.textContent = "Default Output (System Default)";
+        el.selectAudioOutput.appendChild(defaultOutOpt);
+
+        const seenOutLabels = new Set();
+        audioOutputs.forEach((d, idx) => {
+          if (d.deviceId === 'default' || d.deviceId === 'communications') return;
+          const key = (d.label || d.deviceId).toLowerCase();
+          if (seenOutLabels.has(key)) return;
+          seenOutLabels.add(key);
+
           const opt = document.createElement("option");
           opt.value = d.deviceId;
-          opt.textContent = d.label || `Microphone ${idx + 1}`;
-          el.selectAudioInput.appendChild(opt);
+          opt.textContent = d.label || `Speaker/Headset ${idx + 1}`;
+          el.selectAudioOutput.appendChild(opt);
         });
+
+        const savedOut = localStorage.getItem('megazacx_selected_output') || '';
+        const matchingOut = Array.from(el.selectAudioOutput.options).find(o => o.value === savedOut);
+        if (matchingOut) {
+          el.selectAudioOutput.value = savedOut;
+        } else {
+          el.selectAudioOutput.value = "";
+        }
       }
     } catch (e) {
-      console.warn("Could not enumerate audio devices:", e);
+      console.warn("[Audio] Could not enumerate audio devices:", e);
     }
+  }
+
+  async function setAudioOutputDevice(deviceId) {
+    localStorage.setItem('megazacx_selected_output', deviceId || '');
+    state.selectedAudioOutput = deviceId || '';
+
+    if (el.remoteAudioContainer) {
+      const audioElements = el.remoteAudioContainer.querySelectorAll('audio');
+      for (const audioEl of audioElements) {
+        if (typeof audioEl.setSinkId === 'function') {
+          try {
+            await audioEl.setSinkId(deviceId || '');
+          } catch (err) {
+            console.warn('[Audio] Failed to set sinkId on audio element:', err);
+          }
+        }
+      }
+    }
+    const selectedOption = el.selectAudioOutput ? el.selectAudioOutput.options[el.selectAudioOutput.selectedIndex] : null;
+    const outLabel = selectedOption ? selectedOption.textContent : "Output Device";
+    showToast("? Audio output set to " + outLabel);
   }
 
   async function toggleMicTest() {
@@ -1375,9 +1634,9 @@
 
   async function startMicTest() {
     try {
-      const deviceId = el.selectAudioInput.value;
-      const constraints = { audio: deviceId ? { deviceId: { exact: deviceId } } : true };
-      state.testStream = await navigator.mediaDevices.getUserMedia(constraints);
+      stopMicTest();
+      const deviceId = el.selectAudioInput ? el.selectAudioInput.value : '';
+      state.testStream = await getMicrophoneStream(deviceId);
       state.testAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const source = state.testAudioCtx.createMediaStreamSource(state.testStream);
       state.testAnalyser = state.testAudioCtx.createAnalyser();
@@ -1385,8 +1644,10 @@
       source.connect(state.testAnalyser);
 
       state.isTestingMic = true;
-      el.btnTestMic.textContent = "Stop Testing";
-      el.btnTestMic.classList.add("btn-primary");
+      if (el.btnTestMic) {
+        el.btnTestMic.textContent = "Stop Testing";
+        el.btnTestMic.classList.add("btn-primary");
+      }
 
       const buffer = new Uint8Array(state.testAnalyser.frequencyBinCount);
       const updateVU = () => {
@@ -1396,13 +1657,13 @@
         for (let i = 0; i < buffer.length; i++) sum += buffer[i];
         const avg = sum / buffer.length;
         const percent = Math.min(100, Math.round((avg / 60) * 100));
-        el.vuMeterFill.style.width = percent + "%";
+        if (el.vuMeterFill) el.vuMeterFill.style.width = percent + "%";
         requestAnimationFrame(updateVU);
       };
       updateVU();
     } catch (e) {
       console.error("Mic test error:", e);
-      alert("Could not access microphone for testing.");
+      showToast("?? Could not access microphone for testing.");
     }
   }
 
@@ -1744,6 +2005,41 @@
     };
 
     el.btnTestMic.onclick = toggleMicTest;
+
+    if (el.selectAudioInput) {
+      el.selectAudioInput.onchange = (e) => {
+        switchLocalAudioDevice(e.target.value);
+      };
+    }
+
+    if (el.selectAudioOutput) {
+      el.selectAudioOutput.onchange = (e) => {
+        setAudioOutputDevice(e.target.value);
+      };
+    }
+
+    if (el.btnRefreshAudioDevices) {
+      el.btnRefreshAudioDevices.onclick = async () => {
+        await loadAudioInputDevices(true);
+        showToast("? Audio device list refreshed");
+      };
+    }
+
+    // Dynamic hardware change detection (plugging/unplugging headsets or microphones)
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+      navigator.mediaDevices.addEventListener('devicechange', async () => {
+        console.log('[Audio] Hardware device change detected');
+        await loadAudioInputDevices();
+        if (state.activeVoiceChannel && state.localStream) {
+          const liveTrack = state.localStream.getAudioTracks().find(t => t.readyState === 'live');
+          if (!liveTrack) {
+            console.warn('[Audio] Active microphone disconnected, falling back to default...');
+            await switchLocalAudioDevice('');
+          }
+        }
+      });
+    }
+
     el.sliderSensitivity.value = state.vadThreshold;
     el.sliderSensitivity.oninput = (e) => {
       state.vadThreshold = parseInt(e.target.value, 10);
@@ -1965,6 +2261,22 @@
       }
     }, 2500);
   }
+
+  // Expose state and audio methods for test QA & automation
+  window.__megaZacx = {
+    state,
+    el,
+    getMicrophoneStream,
+    startLocalAudio,
+    stopLocalAudio,
+    switchLocalAudioDevice,
+    setAudioOutputDevice,
+    loadAudioInputDevices,
+    startMicTest,
+    stopMicTest,
+    handleJoinVoice,
+    handleLeaveVoice
+  };
 
   window.addEventListener("DOMContentLoaded", () => {
     updateProfileUI();
