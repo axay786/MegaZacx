@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const os = require('os');
 const cors = require('cors');
+const AuthManager = require('./auth');
 
 function getLocalIpAddresses() {
   const interfaces = os.networkInterfaces();
@@ -46,7 +47,10 @@ channelMessages.set('general', [
   }
 ]);
 
-function createServer(port = 3888) {
+const authManager = new AuthManager(path.join(__dirname, '..', '..', 'data'));
+
+function createServer(port = 3888, customAuthManager = null) {
+  const activeAuth = customAuthManager || authManager;
   const app = express();
   app.use(cors({ origin: '*' }));
   app.use(express.json());
@@ -79,16 +83,18 @@ function createServer(port = 3888) {
   io.on('connection', (socket) => {
     console.log('[MegaZacx Server] Peer connected:', socket.id);
 
-    const handleUserRegistration = (userData) => {
+    const bindSocketUser = (userProfile, isGuest = false) => {
       const user = {
         id: socket.id,
-        username: (userData && userData.username) ? userData.username : 'User_' + socket.id.slice(0, 4),
-        avatarColor: (userData && userData.avatarColor) ? userData.avatarColor : '#7C3AED',
-        avatarInitial: (userData && userData.username && userData.username.length > 0) ? userData.username[0].toUpperCase() : 'U',
+        accountId: userProfile.id,
+        username: userProfile.username,
+        avatarColor: userProfile.avatarColor,
+        avatarInitial: userProfile.avatarInitial || userProfile.username[0].toUpperCase(),
         voiceChannel: null,
         isMuted: false,
         isDeafened: false,
-        isSpeaking: false
+        isSpeaking: false,
+        isGuest: Boolean(isGuest)
       };
 
       connectedUsers.set(socket.id, user);
@@ -101,6 +107,99 @@ function createServer(port = 3888) {
       });
 
       io.emit('users-update', Array.from(connectedUsers.values()));
+      return user;
+    };
+
+    // --- Authentication & Multi-Device Account Handlers ---
+
+    // 1. Register with Duplicate Username Validation
+    socket.on('auth-register', (data, callback) => {
+      const result = activeAuth.register(data || {});
+      if (result.success) {
+        bindSocketUser(result.user, false);
+      }
+      if (typeof callback === 'function') {
+        callback(result);
+      }
+    });
+
+    // 2. Account Login
+    socket.on('auth-login', (data, callback) => {
+      const result = activeAuth.login(data || {});
+      if (result.success) {
+        bindSocketUser(result.user, false);
+      }
+      if (typeof callback === 'function') {
+        callback(result);
+      }
+    });
+
+    // 3. Verify Session Token (Automatic login on device reconnect)
+    socket.on('auth-verify', (data, callback) => {
+      const userProfile = activeAuth.verifyToken(data && data.token);
+      if (userProfile) {
+        bindSocketUser(userProfile, false);
+        if (typeof callback === 'function') callback({ success: true, user: userProfile });
+      } else {
+        if (typeof callback === 'function') callback({ success: false, error: 'Session expired or invalid.' });
+      }
+    });
+
+    // 4. Update Profile
+    socket.on('auth-update-profile', (data, callback) => {
+      const user = connectedUsers.get(socket.id);
+      if (!user || user.isGuest || !user.accountId) {
+        if (typeof callback === 'function') callback({ success: false, error: 'Not logged in.' });
+        return;
+      }
+      const result = activeAuth.updateProfile(user.accountId, data || {});
+      if (result.success) {
+        user.username = result.user.username;
+        user.avatarColor = result.user.avatarColor;
+        user.avatarInitial = result.user.avatarInitial;
+        io.emit('users-update', Array.from(connectedUsers.values()));
+      }
+      if (typeof callback === 'function') callback(result);
+    });
+
+    // 5. Logout
+    socket.on('auth-logout', (data) => {
+      if (data && data.token) {
+        activeAuth.logout(data.token);
+      }
+    });
+
+    // 6. Legacy / Guest fallback connection
+    const handleUserRegistration = (userData) => {
+      let userProfile = null;
+      if (userData && userData.token) {
+        userProfile = activeAuth.verifyToken(userData.token);
+      }
+
+      if (userProfile) {
+        bindSocketUser(userProfile, false);
+      } else {
+        const guestUser = {
+          id: socket.id,
+          accountId: 'guest_' + socket.id.slice(0, 8),
+          username: (userData && userData.username) ? userData.username : 'Guest_' + socket.id.slice(0, 4),
+          avatarColor: (userData && userData.avatarColor) ? userData.avatarColor : '#06B6D4',
+          avatarInitial: (userData && userData.username && userData.username.length > 0) ? userData.username[0].toUpperCase() : 'G',
+          voiceChannel: null,
+          isMuted: false,
+          isDeafened: false,
+          isSpeaking: false,
+          isGuest: true
+        };
+        connectedUsers.set(socket.id, guestUser);
+        socket.emit('init-success', {
+          currentUser: guestUser,
+          channels: DEFAULT_CHANNELS,
+          users: Array.from(connectedUsers.values()),
+          messages: Object.fromEntries(channelMessages.entries())
+        });
+        io.emit('users-update', Array.from(connectedUsers.values()));
+      }
     };
 
     socket.on('init-user', handleUserRegistration);
@@ -243,7 +342,7 @@ function createServer(port = 3888) {
       const message = {
         id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
         channelId,
-        senderId: user.id,
+        senderId: user.accountId || user.id,
         senderName: user.username,
         avatarColor: user.avatarColor,
         avatarInitial: user.avatarInitial,

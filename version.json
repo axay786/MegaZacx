@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
-  "commit": "29c9a37",
+  "version": "1.0.4",
+  "commit": "a230637",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-31T06:25:43.012Z",
-  "releaseNotes": "Multi-device voice input detection, dynamic hot-swapping, fail-safe audio stream resolution, and audio output routing"
+  "updatedAt": "2026-10-31T10:56:00.000Z",
+  "releaseNotes": "Multi-device persistent user identities, strict case-insensitive duplicate username validation, secure password hashing, and 1-click multi-account switching"
 }

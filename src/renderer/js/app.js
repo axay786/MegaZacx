@@ -12,6 +12,8 @@
     socket: null,
     currentUser: {
       id: null,
+      accountId: null,
+      isGuest: true,
       username: localStorage.getItem('megazacx_username') || 'Gamer_' + Math.floor(1000 + Math.random() * 9000),
       avatarColor: localStorage.getItem('megazacx_avatar_color') || '#7C3AED',
       avatarInitial: 'G',
@@ -203,7 +205,34 @@
     btnConnectRemote: document.getElementById('btn-connect-remote'),
     appToast: document.getElementById('app-toast'),
     toastMessage: document.getElementById('toast-message'),
-    remoteAudioContainer: document.getElementById('remote-audio-container')
+    remoteAudioContainer: document.getElementById('remote-audio-container'),
+
+    // User Account & Multi-Device Auth Elements
+    userAccountBadge: document.getElementById('user-account-badge'),
+    accountMenuPopover: document.getElementById('account-menu-popover'),
+    popoverAvatar: document.getElementById('popover-avatar'),
+    popoverUsername: document.getElementById('popover-username'),
+    popoverStatus: document.getElementById('popover-status'),
+    popoverAccountsList: document.getElementById('popover-accounts-list'),
+    btnPopoverAddAccount: document.getElementById('btn-popover-add-account'),
+    btnPopoverOpenSettings: document.getElementById('btn-popover-open-settings'),
+    btnPopoverLogout: document.getElementById('btn-popover-logout'),
+    authModal: document.getElementById('auth-modal'),
+    authModalTitle: document.getElementById('auth-modal-title'),
+    btnCloseAuthModal: document.getElementById('btn-close-auth-modal'),
+    authTabLogin: document.getElementById('auth-tab-login'),
+    authTabRegister: document.getElementById('auth-tab-register'),
+    authErrorBanner: document.getElementById('auth-error-banner'),
+    authForm: document.getElementById('auth-form'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    authAvatarGroup: document.getElementById('auth-avatar-group'),
+    authColorPicker: document.getElementById('auth-color-picker'),
+    btnAuthSubmit: document.getElementById('btn-auth-submit'),
+    btnContinueGuest: document.getElementById('btn-continue-guest'),
+    profileAccountTitle: document.getElementById('profile-account-title'),
+    profileAccountType: document.getElementById('profile-account-type'),
+    btnOpenAuthFromSettings: document.getElementById('btn-open-auth-from-settings')
   };
 
   function showToast(msg) {
@@ -294,11 +323,331 @@
     }
   }
 
+  // --- Multi-Device Account & Identity Management ---
+  let authMode = "login"; // "login" | "register"
+  let selectedAuthAvatarColor = "#7C3AED";
+
+  function getSavedAccounts() {
+    try {
+      const raw = localStorage.getItem("megazacx_saved_accounts");
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveAccount(acc) {
+    if (!acc || !acc.id || !acc.token) return;
+    const accounts = getSavedAccounts();
+    const idx = accounts.findIndex(a => a.id === acc.id || (a.username && acc.username && a.username.toLowerCase() === acc.username.toLowerCase()));
+    if (idx >= 0) {
+      accounts[idx] = { ...accounts[idx], ...acc };
+    } else {
+      accounts.push(acc);
+    }
+    localStorage.setItem("megazacx_saved_accounts", JSON.stringify(accounts));
+  }
+
+  function removeSavedAccount(accountId) {
+    const accounts = getSavedAccounts().filter(a => a.id !== accountId);
+    localStorage.setItem("megazacx_saved_accounts", JSON.stringify(accounts));
+    renderAccountSwitcher();
+  }
+
+  function onAuthSuccess(user, token, showFeedback = false) {
+    state.currentUser.id = user.id;
+    state.currentUser.accountId = user.id;
+    state.currentUser.username = user.username;
+    state.currentUser.avatarColor = user.avatarColor || "#7C3AED";
+    state.currentUser.avatarInitial = user.avatarInitial || (user.username ? user.username[0].toUpperCase() : "M");
+    state.currentUser.isGuest = false;
+
+    localStorage.setItem("megazacx_auth_token", token);
+    localStorage.setItem("megazacx_username", user.username);
+    localStorage.setItem("megazacx_avatar_color", state.currentUser.avatarColor);
+
+    saveAccount({
+      id: user.id,
+      username: user.username,
+      avatarColor: state.currentUser.avatarColor,
+      token
+    });
+
+    updateProfileUI();
+    renderAccountSwitcher();
+
+    if (showFeedback) {
+      showToast(`Welcome, ${user.username}! Signed in.`);
+    }
+  }
+
+  function connectAsGuest() {
+    state.currentUser.isGuest = true;
+    state.currentUser.accountId = null;
+    if (state.socket && state.socket.connected) {
+      state.socket.emit("init-user", {
+        username: state.currentUser.username,
+        avatarColor: state.currentUser.avatarColor
+      });
+    }
+    updateProfileUI();
+    renderAccountSwitcher();
+  }
+
+  function authenticateActiveSession() {
+    if (!state.socket || !state.socket.connected) return;
+    const token = localStorage.getItem("megazacx_auth_token");
+    if (token) {
+      state.socket.emit("auth-verify", { token }, (res) => {
+        if (res && res.success && res.user) {
+          onAuthSuccess(res.user, token, false);
+        } else {
+          console.warn("[MegaZacx] Stored token invalid or expired. Falling back to guest.");
+          localStorage.removeItem("megazacx_auth_token");
+          connectAsGuest();
+        }
+      });
+    } else {
+      connectAsGuest();
+    }
+  }
+
+  function switchAccount(acc) {
+    if (!acc || !acc.token) return;
+    if (acc.id === state.currentUser.accountId && !state.currentUser.isGuest) {
+      if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+      return;
+    }
+
+    if (state.socket && state.socket.connected) {
+      state.socket.emit("auth-verify", { token: acc.token }, (res) => {
+        if (res && res.success && res.user) {
+          onAuthSuccess(res.user, acc.token, true);
+          if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+        } else {
+          showToast(`Session expired for ${acc.username}. Please log in again.`);
+          removeSavedAccount(acc.id);
+          openAuthModal("login");
+        }
+      });
+    }
+  }
+
+  function logoutCurrentAccount() {
+    const token = localStorage.getItem("megazacx_auth_token");
+    if (token && state.socket && state.socket.connected) {
+      state.socket.emit("auth-logout", { token });
+    }
+    localStorage.removeItem("megazacx_auth_token");
+    connectAsGuest();
+    if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+    showToast("Logged out of account. Running as Guest.");
+  }
+
+  function toggleAccountPopover() {
+    if (!el.accountMenuPopover) return;
+    const isHidden = el.accountMenuPopover.classList.contains("hidden");
+    if (isHidden) {
+      renderAccountSwitcher();
+      el.accountMenuPopover.classList.remove("hidden");
+    } else {
+      el.accountMenuPopover.classList.add("hidden");
+    }
+  }
+
+  function renderAccountSwitcher() {
+    if (!el.popoverAccountsList) return;
+
+    if (el.popoverAvatar) {
+      el.popoverAvatar.textContent = state.currentUser.avatarInitial;
+      el.popoverAvatar.style.backgroundColor = state.currentUser.avatarColor;
+    }
+    if (el.popoverUsername) {
+      el.popoverUsername.textContent = state.currentUser.username;
+    }
+    if (el.popoverStatus) {
+      el.popoverStatus.textContent = state.currentUser.isGuest ? "Guest Mode (Temporary session)" : "Online • Verified Account";
+      el.popoverStatus.style.color = state.currentUser.isGuest ? "#F59E0B" : "#34D399";
+    }
+
+    const saved = getSavedAccounts();
+    const otherAccounts = saved.filter(a => a.id !== state.currentUser.accountId);
+
+    el.popoverAccountsList.innerHTML = "";
+
+    if (otherAccounts.length === 0) {
+      const emptyMsg = document.createElement("div");
+      emptyMsg.style.fontSize = "11px";
+      emptyMsg.style.color = "var(--text-muted)";
+      emptyMsg.style.padding = "6px 2px";
+      emptyMsg.textContent = "No other saved accounts on this device.";
+      el.popoverAccountsList.appendChild(emptyMsg);
+    } else {
+      otherAccounts.forEach(acc => {
+        const row = document.createElement("div");
+        row.className = "saved-account-row";
+
+        const left = document.createElement("div");
+        left.className = "saved-account-left";
+
+        const av = document.createElement("div");
+        av.className = "saved-account-avatar";
+        av.style.backgroundColor = acc.avatarColor || "#7C3AED";
+        av.textContent = (acc.username && acc.username[0] ? acc.username[0].toUpperCase() : "?");
+
+        const name = document.createElement("div");
+        name.className = "saved-account-name";
+        name.textContent = acc.username;
+
+        left.appendChild(av);
+        left.appendChild(name);
+
+        const btnSwitch = document.createElement("button");
+        btnSwitch.className = "btn-switch-account";
+        btnSwitch.textContent = "Switch";
+        btnSwitch.onclick = (e) => {
+          e.stopPropagation();
+          switchAccount(acc);
+        };
+
+        row.appendChild(left);
+        row.appendChild(btnSwitch);
+        el.popoverAccountsList.appendChild(row);
+      });
+    }
+  }
+
+  function openAuthModal(initialMode = "login") {
+    authMode = initialMode;
+    if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+    if (el.authErrorBanner) {
+      el.authErrorBanner.classList.add("hidden");
+      el.authErrorBanner.textContent = "";
+    }
+    if (el.authPassword) el.authPassword.value = "";
+    updateAuthModalTabs();
+    if (el.authModal) el.authModal.classList.remove("hidden");
+    if (el.authUsername) el.authUsername.focus();
+  }
+
+  function closeAuthModal() {
+    if (el.authModal) el.authModal.classList.add("hidden");
+    if (el.authPassword) el.authPassword.value = "";
+    if (el.authErrorBanner) el.authErrorBanner.classList.add("hidden");
+  }
+
+  function updateAuthModalTabs() {
+    if (authMode === "register") {
+      if (el.authTabRegister) el.authTabRegister.classList.add("active");
+      if (el.authTabLogin) el.authTabLogin.classList.remove("active");
+      if (el.authModalTitle) el.authModalTitle.textContent = "Create MegaZacx Account";
+      if (el.authAvatarGroup) el.authAvatarGroup.classList.remove("hidden");
+      if (el.btnAuthSubmit) el.btnAuthSubmit.textContent = "Register & Save Account";
+    } else {
+      if (el.authTabLogin) el.authTabLogin.classList.add("active");
+      if (el.authTabRegister) el.authTabRegister.classList.remove("active");
+      if (el.authModalTitle) el.authModalTitle.textContent = "Log In to MegaZacx";
+      if (el.authAvatarGroup) el.authAvatarGroup.classList.add("hidden");
+      if (el.btnAuthSubmit) el.btnAuthSubmit.textContent = "Log In";
+    }
+  }
+
+  function showAuthError(msg) {
+    if (el.authErrorBanner) {
+      el.authErrorBanner.textContent = msg;
+      el.authErrorBanner.classList.remove("hidden");
+    }
+  }
+
+  function handleAuthSubmit() {
+    const username = (el.authUsername ? el.authUsername.value : "").trim();
+    const password = (el.authPassword ? el.authPassword.value : "");
+
+    if (!username) {
+      showAuthError("Please enter a username.");
+      if (el.authUsername) el.authUsername.focus();
+      return;
+    }
+    if (!password || password.length < 4) {
+      showAuthError("Password must be at least 4 characters long.");
+      if (el.authPassword) el.authPassword.focus();
+      return;
+    }
+
+    if (!state.socket || !state.socket.connected) {
+      showAuthError("Not connected to server. Please check connection.");
+      return;
+    }
+
+    if (el.btnAuthSubmit) {
+      el.btnAuthSubmit.disabled = true;
+      el.btnAuthSubmit.textContent = "Processing...";
+    }
+
+    if (authMode === "register") {
+      state.socket.emit("auth-register", {
+        username,
+        password,
+        avatarColor: selectedAuthAvatarColor
+      }, (res) => {
+        if (el.btnAuthSubmit) {
+          el.btnAuthSubmit.disabled = false;
+          el.btnAuthSubmit.textContent = "Register & Save Account";
+        }
+        if (!res || !res.success) {
+          // DUPLICATE USERNAME VALIDATION OR REJECTION DISPLAY
+          const errMsg = (res && res.error) ? res.error : "Registration failed. Please choose another username.";
+          showAuthError(errMsg);
+        } else {
+          onAuthSuccess(res.user, res.token, true);
+          closeAuthModal();
+        }
+      });
+    } else {
+      state.socket.emit("auth-login", {
+        username,
+        password
+      }, (res) => {
+        if (el.btnAuthSubmit) {
+          el.btnAuthSubmit.disabled = false;
+          el.btnAuthSubmit.textContent = "Log In";
+        }
+        if (!res || !res.success) {
+          const errMsg = (res && res.error) ? res.error : "Login failed. Invalid username or password.";
+          showAuthError(errMsg);
+        } else {
+          onAuthSuccess(res.user, res.token, true);
+          closeAuthModal();
+        }
+      });
+    }
+  }
+
   function updateProfileUI() {
     el.userAvatar.textContent = state.currentUser.avatarInitial;
     el.userAvatar.style.backgroundColor = state.currentUser.avatarColor;
     el.userDisplayName.textContent = state.currentUser.username;
     el.inputNickname.value = state.currentUser.username;
+
+    if (el.userAccountBadge) {
+      if (!state.currentUser.isGuest) {
+        el.userAccountBadge.textContent = "Account";
+        el.userAccountBadge.style.color = "#34D399";
+        el.userAccountBadge.style.borderColor = "rgba(52, 211, 153, 0.4)";
+      } else {
+        el.userAccountBadge.textContent = "Guest";
+        el.userAccountBadge.style.color = "var(--text-muted)";
+        el.userAccountBadge.style.borderColor = "transparent";
+      }
+    }
+
+    if (el.profileAccountTitle) {
+      el.profileAccountTitle.textContent = state.currentUser.username;
+    }
+    if (el.profileAccountType) {
+      el.profileAccountType.textContent = state.currentUser.isGuest ? "Guest Mode (Temporary session)" : "Persistent Account (Verified)";
+      el.profileAccountType.style.color = state.currentUser.isGuest ? "#F59E0B" : "#34D399";
+    }
 
     el.colorOptions.forEach(opt => {
       if (opt.getAttribute('data-color') === state.currentUser.avatarColor) {
@@ -335,18 +684,18 @@
       el.serverStatusText.textContent = isLocal ? `Hosting (:3888)` : `Online: ${socketTarget.replace(/^https?:\/\//, "")}`;
       el.netServerIp.textContent = socketTarget;
 
-      state.socket.emit("init-user", {
-        username: state.currentUser.username,
-        avatarColor: state.currentUser.avatarColor
-      });
-      state.socket.emit("register-user", {
-        username: state.currentUser.username,
-        avatarColor: state.currentUser.avatarColor
-      });
+      authenticateActiveSession();
     });
 
     state.socket.on("init-success", (data) => {
       state.currentUser.id = data.currentUser.id;
+      if (data.currentUser.accountId) state.currentUser.accountId = data.currentUser.accountId;
+      state.currentUser.isGuest = Boolean(data.currentUser.isGuest);
+      if (data.currentUser.username) state.currentUser.username = data.currentUser.username;
+      if (data.currentUser.avatarColor) state.currentUser.avatarColor = data.currentUser.avatarColor;
+      state.currentUser.avatarInitial = data.currentUser.avatarInitial || (data.currentUser.username ? data.currentUser.username[0].toUpperCase() : "G");
+      updateProfileUI();
+
       state.channels = data.channels;
       applySavedChannelRenames(state.channels);
       state.allUsers = data.users;
@@ -1964,16 +2313,98 @@
 
     el.btnOpenSettings.onclick = openSettings;
     if (el.btnQuickSettings) el.btnQuickSettings.onclick = openSettings;
-    el.btnOpenProfile.onclick = openSettings;
+    if (el.btnOpenProfile) {
+      el.btnOpenProfile.onclick = (e) => {
+        e.stopPropagation();
+        toggleAccountPopover();
+      };
+    }
     el.btnCloseSettings.onclick = closeSettings;
 
-    document.querySelectorAll(".tab-btn").forEach(btn => {
+    // Popover actions
+    if (el.btnPopoverOpenSettings) {
+      el.btnPopoverOpenSettings.onclick = () => {
+        if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+        openSettings();
+        const profileTabBtn = document.querySelector(`.settings-tabs .tab-btn[data-tab="tab-profile"]`);
+        if (profileTabBtn) profileTabBtn.click();
+      };
+    }
+    if (el.btnPopoverAddAccount) {
+      el.btnPopoverAddAccount.onclick = () => {
+        openAuthModal("login");
+      };
+    }
+    if (el.btnPopoverLogout) {
+      el.btnPopoverLogout.onclick = () => {
+        logoutCurrentAccount();
+      };
+    }
+
+    // Close popover on click outside
+    document.addEventListener("click", (e) => {
+      if (el.accountMenuPopover && !el.accountMenuPopover.classList.contains("hidden")) {
+        if (!el.accountMenuPopover.contains(e.target) && !el.btnOpenProfile.contains(e.target)) {
+          el.accountMenuPopover.classList.add("hidden");
+        }
+      }
+    });
+
+    // Auth Modal event listeners
+    if (el.btnCloseAuthModal) el.btnCloseAuthModal.onclick = closeAuthModal;
+    if (el.btnContinueGuest) {
+      el.btnContinueGuest.onclick = () => {
+        closeAuthModal();
+        connectAsGuest();
+        showToast("Continuing as Guest");
+      };
+    }
+    if (el.btnOpenAuthFromSettings) {
+      el.btnOpenAuthFromSettings.onclick = () => {
+        closeSettings();
+        openAuthModal("login");
+      };
+    }
+    if (el.authTabLogin) {
+      el.authTabLogin.onclick = () => {
+        authMode = "login";
+        updateAuthModalTabs();
+      };
+    }
+    if (el.authTabRegister) {
+      el.authTabRegister.onclick = () => {
+        authMode = "register";
+        updateAuthModalTabs();
+      };
+    }
+    if (el.authColorPicker) {
+      el.authColorPicker.querySelectorAll(".color-option").forEach(opt => {
+        opt.onclick = () => {
+          el.authColorPicker.querySelectorAll(".color-option").forEach(o => o.classList.remove("active"));
+          opt.classList.add("active");
+          selectedAuthAvatarColor = opt.getAttribute("data-color") || "#7C3AED";
+        };
+      });
+    }
+    if (el.btnAuthSubmit) {
+      el.btnAuthSubmit.onclick = handleAuthSubmit;
+    }
+    if (el.authForm) {
+      el.authForm.onsubmit = (e) => {
+        e.preventDefault();
+        handleAuthSubmit();
+      };
+    }
+
+    // Settings tabs
+    document.querySelectorAll(".settings-tabs .tab-btn").forEach(btn => {
       btn.onclick = () => {
-        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".settings-tabs .tab-btn").forEach(b => b.classList.remove("active"));
         document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
         btn.classList.add("active");
         const tabId = btn.getAttribute("data-tab");
-        document.getElementById(tabId).classList.add("active");
+        const panel = document.getElementById(tabId);
+        if (panel) panel.classList.add("active");
       };
     });
 
@@ -1995,12 +2426,31 @@
         updateProfileUI();
 
         if (state.socket) {
-          state.socket.emit("init-user", {
-            username: state.currentUser.username,
-            avatarColor: state.currentUser.avatarColor
-          });
+          if (!state.currentUser.isGuest && state.currentUser.accountId) {
+            state.socket.emit("auth-update-profile", {
+              username: newName,
+              avatarColor: state.currentUser.avatarColor
+            }, (res) => {
+              if (res && res.success && res.user) {
+                const token = localStorage.getItem("megazacx_auth_token");
+                saveAccount({
+                  id: res.user.id,
+                  username: res.user.username,
+                  avatarColor: res.user.avatarColor,
+                  token
+                });
+                renderAccountSwitcher();
+              }
+            });
+          } else {
+            state.socket.emit("init-user", {
+              username: state.currentUser.username,
+              avatarColor: state.currentUser.avatarColor
+            });
+          }
         }
         closeSettings();
+        showToast("Profile updated!");
       }
     };
 

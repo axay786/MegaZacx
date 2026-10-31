@@ -136,7 +136,7 @@
           </div>
           <div class="user-name-wrap">
             <span id="user-display-name" class="user-display-name">MegaUser</span>
-            <span class="user-custom-tag">#0001</span>
+            <span class="user-custom-tag" id="user-account-badge">#0001</span>
           </div>
         </div>
         <div class="user-profile-controls">
@@ -441,6 +441,16 @@
           <!-- Tab 2: Profile -->
           <div id="tab-profile" class="tab-panel">
             <div class="setting-group">
+              <label>Account Status</label>
+              <div class="info-box" style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                  <div style="font-weight: 700; color: #fff;" id="profile-account-title">MegaUser</div>
+                  <div style="font-size: 12px; color: #34D399;" id="profile-account-type">Persistent Account (Verified)</div>
+                </div>
+                <button id="btn-open-auth-from-settings" class="btn-secondary" style="font-size: 11px; padding: 4px 10px;">Switch / Login</button>
+              </div>
+            </div>
+            <div class="setting-group">
               <label>Display Nickname</label>
               <input type="text" id="input-nickname" class="setting-input" placeholder="Enter nickname" maxlength="24">
             </div>
@@ -510,6 +520,84 @@
                 <div id="update-status-msg" class="update-status-msg hidden"></div>
               </div>
             </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Account Switcher Popover Menu -->
+  <div id="account-menu-popover" class="account-menu-popover hidden">
+    <div class="account-popover-header">
+      <div id="popover-avatar" class="user-avatar" style="width: 34px; height: 34px; font-size: 13px;">M</div>
+      <div class="account-popover-user">
+        <span id="popover-username" class="popover-username">MegaUser</span>
+        <span id="popover-status" class="popover-status">Online • Verified Account</span>
+      </div>
+    </div>
+    <div class="popover-divider"></div>
+    <div class="popover-section-label">SWITCH ACCOUNT</div>
+    <div id="popover-accounts-list" class="popover-accounts-list">
+      <!-- Injected dynamically -->
+    </div>
+    <div class="popover-divider"></div>
+    <button id="btn-popover-add-account" class="popover-action-btn">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      <span>Log In to Another Account</span>
+    </button>
+    <button id="btn-popover-open-settings" class="popover-action-btn">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      <span>Edit Profile & Avatar</span>
+    </button>
+    <button id="btn-popover-logout" class="popover-action-btn danger">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+      <span>Log Out</span>
+    </button>
+  </div>
+
+  <!-- User Authentication (Login / Register) Modal -->
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-window" style="width: 440px;">
+      <div class="modal-header">
+        <h3 id="auth-modal-title">Account Access</h3>
+        <button id="btn-close-auth-modal" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" style="flex-direction: column; gap: 16px;">
+        <div class="auth-tabs">
+          <button id="auth-tab-login" class="tab-btn active" type="button">Log In</button>
+          <button id="auth-tab-register" class="tab-btn" type="button">Register New Account</button>
+        </div>
+
+        <div id="auth-error-banner" class="auth-error-banner hidden"></div>
+
+        <form id="auth-form" onsubmit="return false;" style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="setting-group">
+            <label for="auth-username">Username</label>
+            <input type="text" id="auth-username" class="setting-input" placeholder="Enter username (e.g. eZacx)" maxlength="24" required autocomplete="username">
+            <span id="auth-username-hint" class="slider-caption">Case-insensitive unique username across all devices.</span>
+          </div>
+
+          <div class="setting-group">
+            <label for="auth-password">Password</label>
+            <input type="password" id="auth-password" class="setting-input" placeholder="Enter password (min 4 chars)" minlength="4" required autocomplete="current-password">
+          </div>
+
+          <div id="auth-avatar-group" class="setting-group hidden">
+            <label>Avatar Color</label>
+            <div class="color-picker-row" id="auth-color-picker">
+              <div class="color-option active" data-color="#7C3AED" style="background: #7C3AED;" title="Electric Violet"></div>
+              <div class="color-option" data-color="#06B6D4" style="background: #06B6D4;" title="Cyan Glow"></div>
+              <div class="color-option" data-color="#10B981" style="background: #10B981;" title="Emerald"></div>
+              <div class="color-option" data-color="#F43F5E" style="background: #F43F5E;" title="Rose"></div>
+              <div class="color-option" data-color="#F59E0B" style="background: #F59E0B;" title="Amber"></div>
+              <div class="color-option" data-color="#38BDF8" style="background: #38BDF8;" title="Sky Blue"></div>
+            </div>
+          </div>
+
+          <button id="btn-auth-submit" class="btn-primary" type="submit" style="margin-top: 6px;">Log In</button>
+        </form>
+
+        <div style="display: flex; justify-content: center; margin-top: 4px;">
+          <button id="btn-continue-guest" class="btn-text-small" style="color: var(--text-muted); font-size: 12px;">Continue as Guest</button>
         </div>
       </div>
     </div>
