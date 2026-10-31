@@ -1,7 +1,7 @@
 {
-  "version": "1.0.5",
-  "commit": "806a870",
+  "version": "1.0.6",
+  "commit": "b0202e3",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-31T11:17:00.000Z",
-  "releaseNotes": "User configurable window close action: choose between Close Completely (Default) and Minimize to System Tray with background taskbar restoration"
+  "updatedAt": "2026-10-31T12:05:00.000Z",
+  "releaseNotes": "Self-healing account vault sync across cloud server spin-downs and redeploys, persistent desktop vault storage in AppData, and smart login recovery"
 }

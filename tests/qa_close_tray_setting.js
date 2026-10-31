@@ -106,3 +106,4 @@ console.log(`QA SUMMARY: ${passed} PASSED | ${failed} FAILED`);
 console.log('===============================================================');
 
 process.exit(failed === 0 ? 0 : 1);
+

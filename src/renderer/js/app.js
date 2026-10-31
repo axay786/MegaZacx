@@ -332,18 +332,43 @@
   // --- Multi-Device Account & Identity Management ---
   let authMode = "login"; // "login" | "register"
   let selectedAuthAvatarColor = "#7C3AED";
+  let cachedAccounts = null;
 
   function getSavedAccounts() {
+    if (cachedAccounts) return cachedAccounts;
     try {
       const raw = localStorage.getItem("megazacx_saved_accounts");
-      return raw ? JSON.parse(raw) : [];
+      let list = raw ? JSON.parse(raw) : [];
+      cachedAccounts = list;
+      return list;
     } catch (e) {
       return [];
     }
   }
 
+  // Load from Electron persistent desktop vault if available
+  if (window.megaZacxAPI && typeof window.megaZacxAPI.loadAccountVault === "function") {
+    window.megaZacxAPI.loadAccountVault().then(vaultAccounts => {
+      if (Array.isArray(vaultAccounts) && vaultAccounts.length > 0) {
+        const current = getSavedAccounts();
+        let changed = false;
+        vaultAccounts.forEach(va => {
+          if (!current.some(c => c.username && va.username && c.username.toLowerCase() === va.username.toLowerCase())) {
+            current.push(va);
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem("megazacx_saved_accounts", JSON.stringify(current));
+          cachedAccounts = current;
+          renderAccountSwitcher();
+        }
+      }
+    }).catch(() => {});
+  }
+
   function saveAccount(acc) {
-    if (!acc || !acc.id || !acc.token) return;
+    if (!acc || !acc.id) return;
     const accounts = getSavedAccounts();
     const idx = accounts.findIndex(a => a.id === acc.id || (a.username && acc.username && a.username.toLowerCase() === acc.username.toLowerCase()));
     if (idx >= 0) {
@@ -351,12 +376,22 @@
     } else {
       accounts.push(acc);
     }
+    cachedAccounts = accounts;
     localStorage.setItem("megazacx_saved_accounts", JSON.stringify(accounts));
+
+    // Save to Electron desktop vault in Windows AppData
+    if (window.megaZacxAPI && typeof window.megaZacxAPI.saveAccountVault === "function") {
+      window.megaZacxAPI.saveAccountVault(accounts).catch(() => {});
+    }
   }
 
   function removeSavedAccount(accountId) {
     const accounts = getSavedAccounts().filter(a => a.id !== accountId);
+    cachedAccounts = accounts;
     localStorage.setItem("megazacx_saved_accounts", JSON.stringify(accounts));
+    if (window.megaZacxAPI && typeof window.megaZacxAPI.saveAccountVault === "function") {
+      window.megaZacxAPI.saveAccountVault(accounts).catch(() => {});
+    }
     renderAccountSwitcher();
   }
 
@@ -376,7 +411,9 @@
       id: user.id,
       username: user.username,
       avatarColor: state.currentUser.avatarColor,
-      token
+      token,
+      passwordHash: user.passwordHash || (user.user && user.user.passwordHash),
+      createdAt: user.createdAt
     });
 
     updateProfileUI();
@@ -403,37 +440,64 @@
   function authenticateActiveSession() {
     if (!state.socket || !state.socket.connected) return;
     const token = localStorage.getItem("megazacx_auth_token");
-    if (token) {
-      state.socket.emit("auth-verify", { token }, (res) => {
-        if (res && res.success && res.user) {
-          onAuthSuccess(res.user, token, false);
-        } else {
-          console.warn("[MegaZacx] Stored token invalid or expired. Falling back to guest.");
-          localStorage.removeItem("megazacx_auth_token");
-          connectAsGuest();
-        }
+    const saved = getSavedAccounts();
+
+    // 1. Synchronize client account vault with server (self-heals server if it was restarted / spun down)
+    if (saved && saved.length > 0) {
+      state.socket.emit("auth-sync-vault", { accounts: saved }, () => {
+        proceedAuthVerify();
       });
     } else {
-      connectAsGuest();
+      proceedAuthVerify();
+    }
+
+    function proceedAuthVerify() {
+      if (token) {
+        state.socket.emit("auth-verify", { token }, (res) => {
+          if (res && res.success && res.user) {
+            onAuthSuccess(res.user, token, false);
+          } else {
+            console.warn("[MegaZacx] Stored token invalid or expired. Running as guest.");
+            localStorage.removeItem("megazacx_auth_token");
+            connectAsGuest();
+          }
+        });
+      } else {
+        connectAsGuest();
+      }
     }
   }
 
   function switchAccount(acc) {
-    if (!acc || !acc.token) return;
+    if (!acc) return;
     if (acc.id === state.currentUser.accountId && !state.currentUser.isGuest) {
       if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
       return;
     }
 
     if (state.socket && state.socket.connected) {
-      state.socket.emit("auth-verify", { token: acc.token }, (res) => {
-        if (res && res.success && res.user) {
-          onAuthSuccess(res.user, acc.token, true);
-          if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+      // Sync account record to server first in case server restarted
+      state.socket.emit("auth-sync-vault", { accounts: [acc] }, () => {
+        if (acc.token) {
+          state.socket.emit("auth-verify", { token: acc.token }, (res) => {
+            if (res && res.success && res.user) {
+              onAuthSuccess(res.user, acc.token, true);
+              if (el.accountMenuPopover) el.accountMenuPopover.classList.add("hidden");
+            } else {
+              // Token expired on server: DO NOT REMOVE SAVED ACCOUNT! Prompt password to re-authenticate!
+              showToast(`Session expired for ${acc.username}. Please enter your password to sign in.`);
+              openAuthModal("login");
+              if (el.authUsername) el.authUsername.value = acc.username;
+              if (el.authPassword) {
+                el.authPassword.value = "";
+                el.authPassword.focus();
+              }
+            }
+          });
         } else {
-          showToast(`Session expired for ${acc.username}. Please log in again.`);
-          removeSavedAccount(acc.id);
           openAuthModal("login");
+          if (el.authUsername) el.authUsername.value = acc.username;
+          if (el.authPassword) el.authPassword.focus();
         }
       });
     }
@@ -558,9 +622,33 @@
     }
   }
 
-  function showAuthError(msg) {
+  function showAuthError(msg, typedUsername = null) {
     if (el.authErrorBanner) {
-      el.authErrorBanner.textContent = msg;
+      el.authErrorBanner.innerHTML = "";
+      const textSpan = document.createElement("span");
+      textSpan.textContent = msg;
+      el.authErrorBanner.appendChild(textSpan);
+
+      // If user typed a username that does not exist, provide 1-click register shortcut
+      if (msg.includes("does not exist") && typedUsername) {
+        const actionRow = document.createElement("div");
+        actionRow.style.marginTop = "8px";
+        const btnRegisterNow = document.createElement("button");
+        btnRegisterNow.className = "btn-secondary";
+        btnRegisterNow.style.width = "100%";
+        btnRegisterNow.style.fontSize = "11px";
+        btnRegisterNow.style.padding = "4px 8px";
+        btnRegisterNow.textContent = `Create account "${typedUsername}" now`;
+        btnRegisterNow.onclick = (e) => {
+          e.preventDefault();
+          authMode = "register";
+          updateAuthModalTabs();
+          if (el.authErrorBanner) el.authErrorBanner.classList.add("hidden");
+        };
+        actionRow.appendChild(btnRegisterNow);
+        el.authErrorBanner.appendChild(actionRow);
+      }
+
       el.authErrorBanner.classList.remove("hidden");
     }
   }
@@ -610,9 +698,13 @@
         }
       });
     } else {
+      const savedAccounts = getSavedAccounts();
+      const vaultMatch = savedAccounts.find(a => a.username && a.username.toLowerCase() === username.toLowerCase());
+
       state.socket.emit("auth-login", {
         username,
-        password
+        password,
+        clientVaultAccount: vaultMatch || null
       }, (res) => {
         if (el.btnAuthSubmit) {
           el.btnAuthSubmit.disabled = false;
@@ -620,7 +712,7 @@
         }
         if (!res || !res.success) {
           const errMsg = (res && res.error) ? res.error : "Login failed. Invalid username or password.";
-          showAuthError(errMsg);
+          showAuthError(errMsg, username);
         } else {
           onAuthSuccess(res.user, res.token, true);
           closeAuthModal();

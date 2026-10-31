@@ -169,7 +169,14 @@ function createServer(port = 3888, customAuthManager = null) {
       }
     });
 
-    // 6. Legacy / Guest fallback connection
+    // 6. Client Account Vault Sync (Self-healing on server restart/redeploy)
+    socket.on('auth-sync-vault', (data, callback) => {
+      const accounts = (data && Array.isArray(data.accounts)) ? data.accounts : [];
+      const res = activeAuth.syncVault(accounts);
+      if (typeof callback === 'function') callback({ success: true, ...res });
+    });
+
+    // 7. Legacy / Guest fallback connection
     const handleUserRegistration = (userData) => {
       let userProfile = null;
       if (userData && userData.token) {

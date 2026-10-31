@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -138,18 +138,90 @@ class AuthManager {
         username: newUser.username,
         avatarColor: newUser.avatarColor,
         avatarInitial: newUser.avatarInitial,
-        createdAt: newUser.createdAt
+        createdAt: newUser.createdAt,
+        passwordHash: newUser.passwordHash
       }
     };
   }
 
-  login({ username, password }) {
+  // Restore account from client-vault if server was restarted or deployed with ephemeral filesystem
+  restoreAccount(accountData) {
+    if (!accountData || !accountData.username || !accountData.passwordHash) {
+      return { success: false, error: 'Invalid account data' };
+    }
+    const cleanName = accountData.username.trim();
+    const normalized = cleanName.toLowerCase();
+
+    if (this.users.has(normalized)) {
+      const existing = this.users.get(normalized);
+      if (accountData.token) {
+        this.sessions.set(accountData.token, {
+          userId: existing.id,
+          username: existing.username,
+          createdAt: Date.now()
+        });
+        this.save();
+      }
+      return { success: true, user: existing, alreadyExisted: true };
+    }
+
+    const restored = {
+      id: accountData.id || ('usr_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex')),
+      username: cleanName,
+      normalizedUsername: normalized,
+      passwordHash: accountData.passwordHash,
+      avatarColor: accountData.avatarColor || '#7C3AED',
+      avatarInitial: accountData.avatarInitial || cleanName[0].toUpperCase(),
+      createdAt: accountData.createdAt || new Date().toISOString()
+    };
+
+    this.users.set(normalized, restored);
+    this.usersById.set(restored.id, restored);
+
+    if (accountData.token) {
+      this.sessions.set(accountData.token, {
+        userId: restored.id,
+        username: restored.username,
+        createdAt: Date.now()
+      });
+    }
+
+    this.save();
+    console.log(`[AuthManager] Restored verified user account from vault: ${cleanName} (${restored.id})`);
+    return { success: true, user: restored, restored: true };
+  }
+
+  syncVault(accounts = []) {
+    if (!Array.isArray(accounts)) return { synced: 0 };
+    let count = 0;
+    for (const acc of accounts) {
+      const res = this.restoreAccount(acc);
+      if (res && res.success) count++;
+    }
+    return { synced: count };
+  }
+
+  login({ username, password, clientVaultAccount = null }) {
     if (!username || !password) {
       return { success: false, error: 'Username and password are required.' };
     }
     const cleanName = username.trim();
     const normalized = cleanName.toLowerCase();
-    const user = this.users.get(normalized);
+    let user = this.users.get(normalized);
+
+    // Self-healing: If server was restarted/redeployed and user is not in memory,
+    // verify against client's saved vault hash and auto-restore user account
+    if (!user && clientVaultAccount && clientVaultAccount.passwordHash) {
+      const vaultNorm = (clientVaultAccount.username || '').trim().toLowerCase();
+      if (vaultNorm === normalized) {
+        if (this.verifyPassword(password, clientVaultAccount.passwordHash)) {
+          const restoreRes = this.restoreAccount(clientVaultAccount);
+          if (restoreRes.success) {
+            user = restoreRes.user;
+          }
+        }
+      }
+    }
 
     if (!user) {
       return { success: false, error: `Account "${cleanName}" does not exist. Please check your username or register.` };
@@ -176,7 +248,8 @@ class AuthManager {
         username: user.username,
         avatarColor: user.avatarColor,
         avatarInitial: user.avatarInitial,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        passwordHash: user.passwordHash
       }
     };
   }

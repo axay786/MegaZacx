@@ -1,0 +1,25 @@
+{
+  "users": [
+    {
+      "id": "usr_mvwa9c1o_460b72f6",
+      "username": "eZacx",
+      "normalizedUsername": "ezacx",
+      "passwordHash": "8599f8618488157d5e218f79c217694d:299ecddbceebf4ffaf2d7d86d52931d3c07aca4f39ba1f12d4b10d05eb5985b960b6d5ac1b62c14407603cc6bf62182146765bd20100cebdef8fdcc72f4998e6",
+      "avatarColor": "#7C3AED",
+      "avatarInitial": "E",
+      "createdAt": "2026-10-31T10:53:31.879Z"
+    }
+  ],
+  "sessions": {
+    "tok_cacce8219b85388a49248ba75d62f51f6754a13f6381deb9": {
+      "userId": "usr_mvwa9c1o_460b72f6",
+      "username": "eZacx",
+      "createdAt": 1793444011879
+    },
+    "tok_b8cbc45cc6dca333a72e47dc3c88dc5d682def1558b0d13f": {
+      "userId": "usr_mvwa9c1o_460b72f6",
+      "username": "eZacx",
+      "createdAt": 1793444011974
+    }
+  }
+}

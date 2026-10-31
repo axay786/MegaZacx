@@ -1,7 +1,7 @@
 {
   "name": "ezacx-comm",
   "productName": "MegaZacx",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "MegaZacx - Discord-style Voice & Text Communication Software",
   "main": "src/main/main.js",
   "scripts": {

@@ -4,5 +4,4 @@ node_modules
 dist/
 *.log
 scratch/
-data/
-server-deploy/data/
+/data/

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, session, clipboard, Tray, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { createServer, getLocalIpAddresses } = require('../server/server');
 const updater = require('./updater');
 
@@ -206,6 +207,31 @@ ipcMain.handle('perform-update', async () => {
 
 ipcMain.handle('get-app-version', () => {
   return updater.getCurrentVersion();
+});
+
+// Client Account Vault IPC Handlers (Persisted to Windows AppData)
+ipcMain.handle('save-account-vault', (event, accounts) => {
+  try {
+    const vaultPath = path.join(app.getPath('userData'), 'megazacx_accounts_vault.json');
+    fs.writeFileSync(vaultPath, JSON.stringify(accounts, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.warn('[Main Process] Failed to save accounts vault:', e.message);
+    return false;
+  }
+});
+
+ipcMain.handle('load-account-vault', () => {
+  try {
+    const vaultPath = path.join(app.getPath('userData'), 'megazacx_accounts_vault.json');
+    if (fs.existsSync(vaultPath)) {
+      const raw = fs.readFileSync(vaultPath, 'utf8');
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('[Main Process] Failed to load accounts vault:', e.message);
+  }
+  return [];
 });
 
 // Close Action & System Tray IPC Handlers

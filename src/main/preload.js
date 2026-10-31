@@ -26,5 +26,7 @@ contextBridge.exposeInMainWorld('megaZacxAPI', {
   performUpdate: () => ipcRenderer.invoke('perform-update'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   setCloseToTray: (enabled) => ipcRenderer.send('set-close-to-tray', enabled),
-  getCloseToTray: () => ipcRenderer.invoke('get-close-to-tray')
+  getCloseToTray: () => ipcRenderer.invoke('get-close-to-tray'),
+  saveAccountVault: (accounts) => ipcRenderer.invoke('save-account-vault', accounts),
+  loadAccountVault: () => ipcRenderer.invoke('load-account-vault')
 });
