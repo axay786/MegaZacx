@@ -254,6 +254,46 @@ class AuthManager {
     };
   }
 
+  resetPassword({ username, newPassword }) {
+    if (!username || !newPassword) {
+      return { success: false, error: 'Username and new password are required.' };
+    }
+    const cleanName = username.trim();
+    if (typeof newPassword !== 'string' || newPassword.length < 4) {
+      return { success: false, error: 'Password must be at least 4 characters.' };
+    }
+    const normalized = cleanName.toLowerCase();
+    let user = this.users.get(normalized);
+
+    if (!user) {
+      return this.register({ username: cleanName, password: newPassword });
+    }
+
+    user.passwordHash = this.hashPassword(newPassword);
+
+    const token = 'tok_' + crypto.randomBytes(24).toString('hex');
+    this.sessions.set(token, {
+      userId: user.id,
+      username: user.username,
+      createdAt: Date.now()
+    });
+    this.save();
+    console.log(`[AuthManager] Password reset successfully for: ${user.username} (${user.id})`);
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        avatarColor: user.avatarColor,
+        avatarInitial: user.avatarInitial,
+        createdAt: user.createdAt,
+        passwordHash: user.passwordHash
+      }
+    };
+  }
+
   verifyToken(token) {
     if (!token || typeof token !== 'string') return null;
     const session = this.sessions.get(token);

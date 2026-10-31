@@ -649,6 +649,47 @@
         el.authErrorBanner.appendChild(actionRow);
       }
 
+      // If user typed incorrect password, provide 1-click reset password button
+      if (msg.includes("Incorrect password") && typedUsername) {
+        const actionRow = document.createElement("div");
+        actionRow.style.marginTop = "8px";
+        const btnResetNow = document.createElement("button");
+        btnResetNow.className = "btn-secondary";
+        btnResetNow.style.width = "100%";
+        btnResetNow.style.fontSize = "11px";
+        btnResetNow.style.padding = "6px 8px";
+        btnResetNow.style.borderColor = "rgba(245, 158, 11, 0.4)";
+        btnResetNow.style.color = "#fbbf24";
+        btnResetNow.style.cursor = "pointer";
+        btnResetNow.textContent = `Reset Password for "${typedUsername}" with entered password`;
+        btnResetNow.onclick = (e) => {
+          e.preventDefault();
+          const newPass = (el.authPassword ? el.authPassword.value : "").trim();
+          if (!newPass || newPass.length < 4) {
+            alert("Please type your desired password (at least 4 characters) in the password box and click Reset again.");
+            if (el.authPassword) el.authPassword.focus();
+            return;
+          }
+          btnResetNow.disabled = true;
+          btnResetNow.textContent = "Resetting password...";
+          state.socket.emit("auth-reset-password", {
+            username: typedUsername,
+            newPassword: newPass
+          }, (res) => {
+            if (!res || !res.success) {
+              btnResetNow.disabled = false;
+              btnResetNow.textContent = `Reset Password for "${typedUsername}" with entered password`;
+              alert((res && res.error) ? res.error : "Failed to reset password.");
+            } else {
+              onAuthSuccess(res.user, res.token, true);
+              closeAuthModal();
+            }
+          });
+        };
+        actionRow.appendChild(btnResetNow);
+        el.authErrorBanner.appendChild(actionRow);
+      }
+
       el.authErrorBanner.classList.remove("hidden");
     }
   }

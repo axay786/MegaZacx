@@ -134,6 +134,17 @@ function createServer(port = 3888, customAuthManager = null) {
       }
     });
 
+    // 2b. Password Reset (Self-recovery)
+    socket.on('auth-reset-password', (data, callback) => {
+      const result = activeAuth.resetPassword(data || {});
+      if (result.success) {
+        bindSocketUser(result.user, false);
+      }
+      if (typeof callback === 'function') {
+        callback(result);
+      }
+    });
+
     // 3. Verify Session Token (Automatic login on device reconnect)
     socket.on('auth-verify', (data, callback) => {
       const userProfile = activeAuth.verifyToken(data && data.token);

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.6",
-  "commit": "b0202e3",
+  "version": "1.0.7",
+  "commit": "HEAD",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-31T12:05:00.000Z",
-  "releaseNotes": "Self-healing account vault sync across cloud server spin-downs and redeploys, persistent desktop vault storage in AppData, and smart login recovery"
+  "updatedAt": "2026-10-31T12:25:00.000Z",
+  "releaseNotes": "Password reset self-recovery mechanism with 1-click password reset button on incorrect password, cleaned baseline user database, and enhanced account access"
 }
