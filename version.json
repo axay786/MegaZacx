@@ -1,7 +1,7 @@
 {
-  "version": "1.0.7",
+  "version": "1.0.8",
   "commit": "HEAD",
   "name": "MegaZacx",
-  "updatedAt": "2026-10-31T12:25:00.000Z",
-  "releaseNotes": "Password reset self-recovery mechanism with 1-click password reset button on incorrect password, cleaned baseline user database, and enhanced account access"
+  "updatedAt": "2026-11-04T06:20:00.000Z",
+  "releaseNotes": "Real-time noise suppression & vocal focus DSP pipeline (aggressive highpass, vocal formant peaking, lowpass hiss cut, dynamic downward expander voice gate, and dynamics compressor) with 1-click status bar toggle, plus per-user Voice Booster allowing users to boost specific participant audio up to 300% on the Voice Stage and sidebar"
 }

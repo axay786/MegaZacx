@@ -44,7 +44,15 @@
     testAnalyser: null,
     serverPort: 3888,
     serverIps: [],
-    currentServerUrl: null
+    currentServerUrl: null,
+    noiseSuppressionEnabled: localStorage.getItem('megazacx_noise_suppression') !== 'false',
+    noiseSuppressionPreset: localStorage.getItem('megazacx_noise_suppression_preset') || 'balanced',
+    noiseGateThreshold: parseInt(localStorage.getItem('megazacx_noise_gate_threshold'), 10) || 12,
+    rawMicStream: null,
+    processedMicStream: null,
+    voiceProc: null,
+    userVolumes: new Map(),
+    activeBoosterTargetUserId: null
   };
 
   state.currentUser.avatarInitial = state.currentUser.username.charAt(0).toUpperCase();
@@ -142,6 +150,7 @@
     btnDisconnectVoice: document.getElementById('btn-disconnect-voice'),
     userAvatar: document.getElementById('user-avatar'),
     userDisplayName: document.getElementById('user-display-name'),
+    btnToggleNoiseSuppression: document.getElementById('btn-toggle-noise-suppression'),
     btnToggleMic: document.getElementById('btn-toggle-mic'),
     btnToggleDeafen: document.getElementById('btn-toggle-deafen'),
     iconMic: document.getElementById('icon-mic'),
@@ -191,6 +200,15 @@
     btnCloseSettings: document.getElementById('btn-close-settings'),
     selectAudioInput: document.getElementById('select-audio-input'),
     selectAudioOutput: document.getElementById('select-audio-output'),
+    selectNoiseSuppression: document.getElementById('select-noise-suppression'),
+    badgeNoiseSuppression: document.getElementById('badge-noise-suppression'),
+    sliderNoiseGate: document.getElementById('slider-noise-gate'),
+    labelNoiseGateVal: document.getElementById('label-noise-gate-val'),
+    userVolumeContextMenu: document.getElementById('user-volume-context-menu'),
+    ctxBoosterAvatar: document.getElementById('ctx-booster-avatar'),
+    ctxBoosterUsername: document.getElementById('ctx-booster-username'),
+    ctxBoosterBadge: document.getElementById('ctx-booster-badge'),
+    ctxBoosterSlider: document.getElementById('ctx-booster-slider'),
     micDeviceStatus: document.getElementById('mic-device-status'),
     btnRefreshAudioDevices: document.getElementById('btn-refresh-audio-devices'),
     vuMeterFill: document.getElementById('vu-meter-fill'),
@@ -1020,7 +1038,52 @@
         audioElem.muted = false;
         el.remoteAudioContainer.appendChild(audioElem);
       }
-      audioElem.srcObject = stream;
+
+      // Cleanup prior peer Web Audio context if any
+      if (peerEntry.audioCtx) {
+        try {
+          if (peerEntry.audioCtx.state !== 'closed') peerEntry.audioCtx.close();
+        } catch (e) {}
+        peerEntry.audioCtx = null;
+      }
+
+      // Web Audio Gain Node Voice Booster Pipeline (0% - 300% boost)
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+        const source = audioCtx.createMediaStreamSource(stream);
+        const gainNode = audioCtx.createGain();
+
+        const currentVol = getPeerVolume(peerId);
+        gainNode.gain.value = currentVol / 100;
+
+        // Dynamics limiter to prevent harsh clipping when boosted beyond 100%
+        const limiter = audioCtx.createDynamicsCompressor();
+        limiter.threshold.value = -3.0;
+        limiter.knee.value = 4.0;
+        limiter.ratio.value = 12.0;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.05;
+
+        const dest = audioCtx.createMediaStreamDestination();
+        source.connect(gainNode);
+        gainNode.connect(limiter);
+        limiter.connect(dest);
+
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        source.connect(analyser);
+
+        peerEntry.audioCtx = audioCtx;
+        peerEntry.gainNode = gainNode;
+        peerEntry.analyser = analyser;
+        peerEntry.volumePercent = currentVol;
+
+        audioElem.srcObject = dest.stream;
+      } catch (boostErr) {
+        console.warn("[WebRTC] Voice booster AudioContext fallback to direct stream:", boostErr);
+        audioElem.srcObject = stream;
+      }
+
       audioElem.volume = 1.0;
       audioElem.muted = state.currentUser.isDeafened;
       if (state.selectedAudioOutput && typeof audioElem.setSinkId === 'function') {
@@ -1141,21 +1204,35 @@
     }
   }
 
-  function setupRemoteAudioVAD(peerId, stream) {
+  function setupRemoteAudioVAD(peerId, stream = null) {
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 128;
-      source.connect(analyser);
+      const peer = state.peers.get(peerId);
+      if (!peer) return;
+
+      let audioCtx = peer.audioCtx;
+      let analyser = peer.analyser;
+
+      if (!audioCtx || !analyser) {
+        const targetStream = stream || peer.stream;
+        if (!targetStream) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+        const source = audioCtx.createMediaStreamSource(targetStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        source.connect(analyser);
+        peer.audioCtx = audioCtx;
+        peer.analyser = analyser;
+      }
+
+      if (peer.vadInterval) {
+        clearInterval(peer.vadInterval);
+        peer.vadInterval = null;
+      }
 
       const buffer = new Uint8Array(analyser.frequencyBinCount);
       const checkInterval = setInterval(() => {
         if (!state.peers.has(peerId)) {
           clearInterval(checkInterval);
-          try {
-            if (audioCtx.state !== 'closed') audioCtx.close();
-          } catch (e) {}
           return;
         }
 
@@ -1167,21 +1244,17 @@
         for (let i = 0; i < buffer.length; i++) sum += buffer[i];
         const avg = sum / buffer.length;
 
-        const peer = state.peers.get(peerId);
-        if (peer) {
-          const speakingNow = avg > 14 && !peer.isMuted;
-          if (peer.isSpeaking !== speakingNow) {
-            peer.isSpeaking = speakingNow;
+        const currentPeer = state.peers.get(peerId);
+        if (currentPeer) {
+          const speakingNow = avg > 14 && !currentPeer.isMuted;
+          if (currentPeer.isSpeaking !== speakingNow) {
+            currentPeer.isSpeaking = speakingNow;
             updatePeerSpeakingUI(peerId, speakingNow);
           }
         }
       }, 180);
 
-      const peer = state.peers.get(peerId);
-      if (peer) {
-        peer.audioCtx = audioCtx;
-        peer.vadInterval = checkInterval;
-      }
+      peer.vadInterval = checkInterval;
     } catch (e) {
       console.warn("VAD remote error:", e);
     }
@@ -1200,12 +1273,335 @@
     }
   }
 
+  // --- Voice Booster & Per-User Volume Control System ---
+
+  function loadSavedUserVolumes() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('megazacx_user_volumes') || '{}');
+      for (const [k, v] of Object.entries(saved)) {
+        state.userVolumes.set(k, Math.max(0, Math.min(300, Number(v) || 100)));
+      }
+    } catch (e) {}
+  }
+
+  function getPeerVolume(userId) {
+    if (!userId) return 100;
+    if (state.userVolumes.has(userId)) return state.userVolumes.get(userId);
+
+    const userObj = state.allUsers.find(u => u.id === userId || u.accountId === userId);
+    if (userObj) {
+      if (userObj.accountId && state.userVolumes.has(userObj.accountId)) {
+        return state.userVolumes.get(userObj.accountId);
+      }
+      if (userObj.username) {
+        const norm = userObj.username.toLowerCase();
+        if (state.userVolumes.has(norm)) {
+          return state.userVolumes.get(norm);
+        }
+      }
+    }
+    return 100;
+  }
+
+  function setPeerVolume(userId, volumePercent) {
+    const clamped = Math.max(0, Math.min(300, Math.round(Number(volumePercent) || 100)));
+
+    const userObj = state.allUsers.find(u => u.id === userId || u.accountId === userId);
+    const accountKey = userObj ? (userObj.accountId || userObj.username.toLowerCase()) : userId;
+
+    state.userVolumes.set(accountKey, clamped);
+    state.userVolumes.set(userId, clamped);
+
+    try {
+      const savedMap = JSON.parse(localStorage.getItem('megazacx_user_volumes') || '{}');
+      savedMap[accountKey] = clamped;
+      localStorage.setItem('megazacx_user_volumes', JSON.stringify(savedMap));
+    } catch (e) {}
+
+    const peerEntry = state.peers.get(userId);
+    if (peerEntry && peerEntry.gainNode && peerEntry.audioCtx) {
+      if (peerEntry.audioCtx.state === 'suspended') {
+        peerEntry.audioCtx.resume().catch(() => {});
+      }
+      const gainVal = clamped / 100;
+      peerEntry.gainNode.gain.setValueAtTime(gainVal, peerEntry.audioCtx.currentTime);
+      peerEntry.gainNode.gain.value = gainVal;
+      peerEntry.volumePercent = clamped;
+    }
+
+    updatePeerVolumeUI(userId, clamped);
+  }
+
+  function updatePeerVolumeUI(userId, volumePercent) {
+    // 1. Voice stage card
+    const cardBadge = document.getElementById(`card-vol-badge-${userId}`);
+    if (cardBadge) {
+      cardBadge.textContent = `${volumePercent > 100 ? '🚀 ' : ''}${volumePercent}%`;
+      if (volumePercent > 100) cardBadge.classList.add('boosted');
+      else cardBadge.classList.remove('boosted');
+    }
+    const cardSlider = document.querySelector(`.voice-stage-slider[data-user-id="${userId}"]`);
+    if (cardSlider && document.activeElement !== cardSlider) {
+      cardSlider.value = volumePercent;
+    }
+    const cardBooster = document.querySelector(`.voice-card-booster[data-user-id="${userId}"]`);
+    if (cardBooster) {
+      if (volumePercent > 100) cardBooster.classList.add('is-boosted');
+      else cardBooster.classList.remove('is-boosted');
+    }
+    document.querySelectorAll(`.btn-card-boost[data-user-id="${userId}"]`).forEach(btn => {
+      const val = Number(btn.getAttribute('data-val'));
+      if (val === volumePercent || (val === 200 && volumePercent >= 200)) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    // 2. Sidebar voice-user-row
+    const sidebarVolBtn = document.querySelector(`.btn-user-vol-quick[data-user-id="${userId}"]`);
+    if (sidebarVolBtn) {
+      const textSpan = sidebarVolBtn.querySelector('.user-vol-text');
+      if (textSpan) textSpan.textContent = `${volumePercent > 100 ? '🚀 ' : ''}${volumePercent}%`;
+      if (volumePercent > 100) sidebarVolBtn.classList.add('boosted');
+      else sidebarVolBtn.classList.remove('boosted');
+    }
+
+    // 3. User Volume Popover if active
+    if (state.activeBoosterTargetUserId === userId) {
+      if (el.ctxBoosterBadge) {
+        el.ctxBoosterBadge.textContent = `${volumePercent > 100 ? '🚀 ' : ''}${volumePercent}%`;
+        if (volumePercent > 100) el.ctxBoosterBadge.classList.add('boosted');
+        else el.ctxBoosterBadge.classList.remove('boosted');
+      }
+      if (el.ctxBoosterSlider && document.activeElement !== el.ctxBoosterSlider) {
+        el.ctxBoosterSlider.value = volumePercent;
+      }
+      document.querySelectorAll('.btn-booster-preset').forEach(btn => {
+        const val = Number(btn.getAttribute('data-val'));
+        if (val === volumePercent || (val === 200 && volumePercent >= 200)) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+  }
+
+  function openUserBoosterPopover(x, y, user) {
+    if (!el.userVolumeContextMenu || !user) return;
+    closeChannelContextMenu();
+    state.activeBoosterTargetUserId = user.id;
+
+    if (el.ctxBoosterAvatar) {
+      el.ctxBoosterAvatar.textContent = user.avatarInitial || user.username.charAt(0).toUpperCase();
+      el.ctxBoosterAvatar.style.backgroundColor = user.avatarColor || '#7C3AED';
+    }
+    if (el.ctxBoosterUsername) {
+      el.ctxBoosterUsername.textContent = user.username;
+    }
+
+    const currentVol = getPeerVolume(user.id);
+    updatePeerVolumeUI(user.id, currentVol);
+
+    const popoverWidth = 230;
+    const popoverHeight = 160;
+    const posX = Math.max(10, Math.min(x, window.innerWidth - popoverWidth - 10));
+    const posY = Math.max(10, Math.min(y, window.innerHeight - popoverHeight - 10));
+
+    el.userVolumeContextMenu.style.left = `${posX}px`;
+    el.userVolumeContextMenu.style.top = `${posY}px`;
+    el.userVolumeContextMenu.classList.remove('hidden');
+  }
+
+  function closeUserBoosterPopover() {
+    if (el.userVolumeContextMenu) {
+      el.userVolumeContextMenu.classList.add('hidden');
+    }
+    state.activeBoosterTargetUserId = null;
+  }
+
+  // --- Real-Time Web Audio Noise Suppression & Voice Focus Engine ---
+
+  function setupVoiceProcessing(inputStream) {
+    if (!inputStream) return null;
+
+    if (state.voiceProc && state.voiceProc.audioCtx && state.voiceProc.audioCtx.state !== 'closed') {
+      try { state.voiceProc.audioCtx.close(); } catch (e) {}
+      state.voiceProc = null;
+    }
+
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      const source = audioCtx.createMediaStreamSource(inputStream);
+
+      // 1. High-pass filter (sub-bass / AC hum / desk rumble cutoff < 85 Hz)
+      const highpass = audioCtx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = state.noiseSuppressionEnabled ? 85 : 10;
+      highpass.Q.value = 0.707;
+
+      // 2. Vocal Formant Peaking filter (boosts clarity of human speech around 2.8 kHz)
+      const voicePeak = audioCtx.createBiquadFilter();
+      voicePeak.type = 'peaking';
+      voicePeak.frequency.value = 2800;
+      voicePeak.gain.value = state.noiseSuppressionEnabled ? 3.5 : 0;
+      voicePeak.Q.value = 1.2;
+
+      // 3. Low-pass filter (cuts high-frequency electrical hiss & fan whine > 8 kHz)
+      const lowpass = audioCtx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = state.noiseSuppressionEnabled ? 8000 : 20000;
+      lowpass.Q.value = 0.707;
+
+      // 4. Dynamic Voice Gate (downward expander that attenuates room noise when not speaking)
+      const gateGain = audioCtx.createGain();
+      gateGain.gain.value = 1.0;
+
+      // 5. Dynamics Compressor (voice leveler and anti-clipping limiter)
+      const compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.value = state.noiseSuppressionEnabled ? -24 : 0;
+      compressor.knee.value = 10;
+      compressor.ratio.value = state.noiseSuppressionEnabled ? 4 : 1;
+      compressor.attack.value = 0.005;
+      compressor.release.value = 0.1;
+
+      // 6. Output destination
+      const dest = audioCtx.createMediaStreamDestination();
+
+      source.connect(highpass);
+      highpass.connect(voicePeak);
+      voicePeak.connect(lowpass);
+      lowpass.connect(gateGain);
+      gateGain.connect(compressor);
+      compressor.connect(dest);
+
+      // 7. Analyser for VAD & Noise Gate monitoring
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      source.connect(analyser);
+
+      state.voiceProc = {
+        audioCtx,
+        source,
+        highpass,
+        voicePeak,
+        lowpass,
+        gateGain,
+        compressor,
+        dest,
+        analyser,
+        isGated: false
+      };
+
+      state.processedMicStream = dest.stream;
+      return dest.stream;
+    } catch (err) {
+      console.warn('[Audio] Voice processing fallback to raw stream:', err);
+      state.processedMicStream = inputStream;
+      return inputStream;
+    }
+  }
+
+  function applyNoiseSuppressionSettings() {
+    const isEnabled = state.noiseSuppressionEnabled;
+    const preset = state.noiseSuppressionPreset || 'balanced';
+
+    if (el.btnToggleNoiseSuppression) {
+      if (isEnabled) {
+        el.btnToggleNoiseSuppression.classList.add('active');
+        el.btnToggleNoiseSuppression.title = 'Noise Suppression: Active (Background Noise Filtered)';
+      } else {
+        el.btnToggleNoiseSuppression.classList.remove('active');
+        el.btnToggleNoiseSuppression.title = 'Noise Suppression: Disabled (Raw Mic)';
+      }
+    }
+
+    if (el.selectNoiseSuppression) {
+      el.selectNoiseSuppression.value = isEnabled ? preset : 'off';
+    }
+    if (el.badgeNoiseSuppression) {
+      el.badgeNoiseSuppression.textContent = isEnabled && preset !== 'off' ? 'Active' : 'Disabled';
+      el.badgeNoiseSuppression.style.background = isEnabled && preset !== 'off' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+      el.badgeNoiseSuppression.style.color = isEnabled && preset !== 'off' ? '#10B981' : '#EF4444';
+      el.badgeNoiseSuppression.style.borderColor = isEnabled && preset !== 'off' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+    }
+    if (el.labelNoiseGateVal) {
+      el.labelNoiseGateVal.textContent = `${state.noiseGateThreshold} (Optimal)`;
+    }
+    if (el.sliderNoiseGate) {
+      el.sliderNoiseGate.value = state.noiseGateThreshold;
+    }
+
+    if (state.voiceProc && state.voiceProc.audioCtx) {
+      const { highpass, voicePeak, lowpass, compressor, gateGain, audioCtx } = state.voiceProc;
+      const now = audioCtx.currentTime;
+
+      if (!isEnabled || preset === 'off') {
+        highpass.frequency.setValueAtTime(10, now);
+        highpass.frequency.value = 10;
+        voicePeak.gain.setValueAtTime(0, now);
+        voicePeak.gain.value = 0;
+        lowpass.frequency.setValueAtTime(20000, now);
+        lowpass.frequency.value = 20000;
+        compressor.ratio.setValueAtTime(1, now);
+        compressor.ratio.value = 1;
+        gateGain.gain.setValueAtTime(1.0, now);
+        gateGain.gain.value = 1.0;
+      } else if (preset === 'aggressive') {
+        highpass.frequency.setValueAtTime(110, now);
+        highpass.frequency.value = 110;
+        voicePeak.gain.setValueAtTime(4.5, now);
+        voicePeak.gain.value = 4.5;
+        lowpass.frequency.setValueAtTime(7000, now);
+        lowpass.frequency.value = 7000;
+        compressor.ratio.setValueAtTime(6, now);
+        compressor.ratio.value = 6;
+      } else if (preset === 'studio') {
+        highpass.frequency.setValueAtTime(75, now);
+        highpass.frequency.value = 75;
+        voicePeak.gain.setValueAtTime(2.5, now);
+        voicePeak.gain.value = 2.5;
+        lowpass.frequency.setValueAtTime(10000, now);
+        lowpass.frequency.value = 10000;
+        compressor.ratio.setValueAtTime(3, now);
+        compressor.ratio.value = 3;
+      } else {
+        // Balanced (default)
+        highpass.frequency.setValueAtTime(85, now);
+        highpass.frequency.value = 85;
+        voicePeak.gain.setValueAtTime(3.5, now);
+        voicePeak.gain.value = 3.5;
+        lowpass.frequency.setValueAtTime(8000, now);
+        lowpass.frequency.value = 8000;
+        compressor.ratio.setValueAtTime(4, now);
+        compressor.ratio.value = 4;
+      }
+    }
+  }
+
+  function toggleNoiseSuppression(forceState = null) {
+    if (forceState !== null) {
+      state.noiseSuppressionEnabled = Boolean(forceState);
+    } else {
+      state.noiseSuppressionEnabled = !state.noiseSuppressionEnabled;
+    }
+    localStorage.setItem('megazacx_noise_suppression', state.noiseSuppressionEnabled ? 'true' : 'false');
+    applyNoiseSuppressionSettings();
+    showToast(state.noiseSuppressionEnabled ? '🛡️ Noise Suppression: Active (Background Noise Filtered)' : '⚠️ Noise Suppression: Disabled (Raw Mic)');
+  }
+
   // Bulletproof Multi-Device Microphone Stream Resolution
   async function getMicrophoneStream(preferredDeviceId) {
     const baseAudioConstraints = {
       echoCancellation: true,
       noiseSuppression: true,
-      autoGainControl: true
+      autoGainControl: true,
+      googEchoCancellation: true,
+      googAutoGainControl: true,
+      googNoiseSuppression: true,
+      googHighpassFilter: true,
+      googTypingNoiseDetection: true
     };
 
     // Strategy 1: Request preferred device using { ideal: preferredDeviceId }
@@ -1255,7 +1651,7 @@
     }
 
     state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-    const source = state.audioContext.createMediaStreamSource(state.localStream);
+    const source = state.audioContext.createMediaStreamSource(state.rawMicStream || state.localStream);
     state.analyser = state.audioContext.createAnalyser();
     state.analyser.fftSize = 128;
     source.connect(state.analyser);
@@ -1276,6 +1672,19 @@
       for (let i = 0; i < buffer.length; i++) sum += buffer[i];
       const avg = sum / buffer.length;
 
+      // Real-time Dynamic Voice Gate (Downward Expander)
+      if (state.voiceProc && state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off') {
+        const gateThresh = state.noiseGateThreshold || 12;
+        const now = state.voiceProc.audioCtx.currentTime;
+        if (avg < gateThresh) {
+          state.voiceProc.gateGain.gain.setTargetAtTime(0.01, now, 0.04);
+          state.voiceProc.isGated = true;
+        } else {
+          state.voiceProc.gateGain.gain.setTargetAtTime(1.0, now, 0.005);
+          state.voiceProc.isGated = false;
+        }
+      }
+
       if (avg >= state.vadThreshold) {
         if (!state.currentUser.isSpeaking) {
           setLocalSpeaking(true);
@@ -1285,7 +1694,7 @@
           setLocalSpeaking(false);
         }, 350);
       }
-    }, 150);
+    }, 120);
   }
 
   // Local Voice Capture & VAD with Multi-Device Support
@@ -1296,14 +1705,22 @@
 
     try {
       const selectedMic = el.selectAudioInput ? el.selectAudioInput.value : (localStorage.getItem('megazacx_selected_mic') || '');
-      state.localStream = await getMicrophoneStream(selectedMic);
+      const rawStream = await getMicrophoneStream(selectedMic);
+      state.rawMicStream = rawStream;
 
-      if (!state.localStream) {
+      if (!rawStream) {
         throw new Error("No active audio stream could be captured");
       }
 
+      // Route raw microphone through real-time Web Audio Noise Suppression & Voice Focus DSP
+      const processedStream = setupVoiceProcessing(rawStream) || rawStream;
+      state.localStream = processedStream;
+
       // Ensure initial track mute state matches currentUser.isMuted
       state.localStream.getAudioTracks().forEach(track => {
+        track.enabled = !state.currentUser.isMuted;
+      });
+      state.rawMicStream.getAudioTracks().forEach(track => {
         track.enabled = !state.currentUser.isMuted;
       });
 
@@ -1325,10 +1742,11 @@
         }
       });
 
+      applyNoiseSuppressionSettings();
       return state.localStream;
     } catch (err) {
       console.error("[Audio] Could not access microphone:", err);
-      showToast("?? Could not access microphone. Please check system permissions.");
+      showToast("Could not access microphone. Please check system permissions.");
       return null;
     }
   }
@@ -1346,13 +1764,18 @@
     // If currently connected to a voice channel, hot-swap the stream & WebRTC tracks
     if (state.activeVoiceChannel) {
       try {
-        const newStream = await getMicrophoneStream(newDeviceId);
-        if (!newStream) return;
+        const rawNewStream = await getMicrophoneStream(newDeviceId);
+        if (!rawNewStream) return;
+        state.rawMicStream = rawNewStream;
 
-        const newTrack = newStream.getAudioTracks()[0];
+        const processedNewStream = setupVoiceProcessing(rawNewStream) || rawNewStream;
+        state.localStream = processedNewStream;
+
+        const newTrack = processedNewStream.getAudioTracks()[0];
         if (newTrack) {
           newTrack.enabled = !state.currentUser.isMuted;
         }
+        rawNewStream.getAudioTracks().forEach(t => t.enabled = !state.currentUser.isMuted);
 
         // Seamlessly update all active WebRTC peer connections
         for (const [peerId, peerEntry] of state.peers.entries()) {
@@ -1368,28 +1791,21 @@
               }
             } else if (newTrack) {
               try {
-                peerEntry.pc.addTrack(newTrack, newStream);
+                peerEntry.pc.addTrack(newTrack, processedNewStream);
               } catch (e) {}
             }
           }
         }
 
-        // Stop old stream
-        if (state.localStream) {
-          try {
-            state.localStream.getTracks().forEach(t => t.stop());
-          } catch (e) {}
-        }
-
-        state.localStream = newStream;
         setupLocalVAD();
+        applyNoiseSuppressionSettings();
 
         const selectedOption = el.selectAudioInput ? el.selectAudioInput.options[el.selectAudioInput.selectedIndex] : null;
         const micLabel = selectedOption ? selectedOption.textContent : "Microphone";
-        showToast("? Switched to " + micLabel);
+        showToast("Switched to " + micLabel);
       } catch (err) {
         console.error("[Audio] Failed to switch microphone device:", err);
-        showToast("?? Failed to switch microphone: " + err.message);
+        showToast("Failed to switch microphone: " + err.message);
       }
     }
   }
@@ -1402,6 +1818,20 @@
     if (state.speakingTimeout) {
       clearTimeout(state.speakingTimeout);
       state.speakingTimeout = null;
+    }
+    if (state.voiceProc && state.voiceProc.audioCtx) {
+      try {
+        if (state.voiceProc.audioCtx.state !== 'closed') state.voiceProc.audioCtx.close();
+      } catch (e) {}
+      state.voiceProc = null;
+    }
+    if (state.rawMicStream) {
+      try {
+        state.rawMicStream.getTracks().forEach(track => {
+          try { track.stop(); } catch (e) {}
+        });
+      } catch (e) {}
+      state.rawMicStream = null;
     }
     if (state.localStream) {
       try {
@@ -1823,20 +2253,46 @@
           userRow.className = "voice-user-row";
           userRow.setAttribute("data-user-id", user.id);
 
-          const isSpeaking = user.id === state.currentUser.id ? state.currentUser.isSpeaking : (state.peers.get(user.id)?.isSpeaking || false);
-          const isMuted = user.id === state.currentUser.id ? state.currentUser.isMuted : user.isMuted;
-          const isDeafened = user.id === state.currentUser.id ? state.currentUser.isDeafened : user.isDeafened;
+          const isMe = user.id === state.currentUser.id;
+          const isSpeaking = isMe ? state.currentUser.isSpeaking : (state.peers.get(user.id)?.isSpeaking || false);
+          const isMuted = isMe ? state.currentUser.isMuted : user.isMuted;
+          const isDeafened = isMe ? state.currentUser.isDeafened : user.isDeafened;
+          const userVol = isMe ? 100 : getPeerVolume(user.id);
 
           userRow.innerHTML = `
             <div class="voice-user-avatar ${isSpeaking ? "speaking" : ""}" style="background-color: ${user.avatarColor}">
               ${user.avatarInitial || user.username.charAt(0).toUpperCase()}
             </div>
-            <span class="voice-user-name">${user.username}${user.id === state.currentUser.id ? " (You)" : ""}</span>
+            <span class="voice-user-name">${escapeHTML(user.username)}${isMe ? " (You)" : ""}</span>
             <div class="voice-user-badges">
               ${isMuted ? "<span class=\"badge-muted\">&#x1F507;</span>" : ""}
               ${isDeafened ? "<span class=\"badge-deafened\">&#x1F3A7;</span>" : ""}
+              ${!isMe ? `
+                <button type="button" class="btn-user-vol-quick ${userVol > 100 ? 'boosted' : ''}" data-user-id="${user.id}" title="User Volume / Voice Boost (${userVol}%)">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                  </svg>
+                  <span class="user-vol-text">${userVol > 100 ? '🚀 ' : ''}${userVol}%</span>
+                </button>
+              ` : ''}
             </div>
           `;
+
+          if (!isMe) {
+            const volBtn = userRow.querySelector('.btn-user-vol-quick');
+            if (volBtn) {
+              volBtn.onclick = (e) => {
+                e.stopPropagation();
+                openUserBoosterPopover(e.clientX, e.clientY, user);
+              };
+            }
+            userRow.oncontextmenu = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              openUserBoosterPopover(e.clientX, e.clientY, user);
+            };
+          }
+
           nestedList.appendChild(userRow);
         });
 
@@ -1906,6 +2362,7 @@
     el.onlineMembersCount.textContent = state.allUsers.length;
 
     state.allUsers.forEach(user => {
+      const isMe = user.id === state.currentUser.id;
       const row = document.createElement("div");
       row.className = "member-row";
       const isVoice = user.voiceChannel ? "🔊 In Voice" : "Online";
@@ -1917,10 +2374,21 @@
           <div class="user-status-dot online"></div>
         </div>
         <div class="member-info">
-          <span class="member-name">${escapeHTML(user.username)}${user.id === state.currentUser.id ? " (You)" : ""}</span>
+          <span class="member-name">${escapeHTML(user.username)}${isMe ? " (You)" : ""}</span>
           <span class="member-status-text">${isVoice}</span>
         </div>
       `;
+
+      if (!isMe && user.voiceChannel) {
+        row.style.cursor = "pointer";
+        row.title = `Right-click to adjust / boost ${user.username}'s volume`;
+        row.oncontextmenu = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openUserBoosterPopover(e.clientX, e.clientY, user);
+        };
+      }
+
       el.membersList.appendChild(row);
     });
   }
@@ -1941,20 +2409,83 @@
       const isSpeaking = isMe ? state.currentUser.isSpeaking : (state.peers.get(user.id)?.isSpeaking || false);
       const isMuted = isMe ? state.currentUser.isMuted : user.isMuted;
       const isDeafened = isMe ? state.currentUser.isDeafened : user.isDeafened;
+      const userVol = isMe ? 100 : getPeerVolume(user.id);
+      const isBoosted = userVol > 100;
 
       const card = document.createElement("div");
       card.className = `voice-card ${isSpeaking ? "speaking" : ""}`;
       card.setAttribute("data-user-id", user.id);
-      card.innerHTML = `
-        <div class="voice-card-icons">
-          ${isMuted ? "<span class=\"badge-muted\">&#x1F507;</span>" : ""}
-          ${isDeafened ? "<span class=\"badge-deafened\">&#x1F3A7;</span>" : ""}
-        </div>
-        <div class="voice-card-avatar" style="background-color: ${user.avatarColor}">
-          ${user.avatarInitial || user.username.charAt(0).toUpperCase()}
-        </div>
-        <div class="voice-card-name">${escapeHTML(user.username)}${isMe ? " (You)" : ""}</div>
-      `;
+
+      if (isMe) {
+        card.innerHTML = `
+          <div class="voice-card-icons">
+            ${isMuted ? "<span class=\"badge-muted\">&#x1F507;</span>" : ""}
+            ${isDeafened ? "<span class=\"badge-deafened\">&#x1F3A7;</span>" : ""}
+          </div>
+          <div class="voice-card-avatar" style="background-color: ${user.avatarColor}">
+            ${user.avatarInitial || user.username.charAt(0).toUpperCase()}
+          </div>
+          <div class="voice-card-name">${escapeHTML(user.username)} (You)</div>
+          <div class="voice-card-self-footer">
+            <span class="voice-self-tag">${state.noiseSuppressionEnabled ? '🛡️ Voice Focus Active' : '🎤 Mic Active'}</span>
+          </div>
+        `;
+      } else {
+        card.innerHTML = `
+          <div class="voice-card-icons">
+            ${isMuted ? "<span class=\"badge-muted\">&#x1F507;</span>" : ""}
+            ${isDeafened ? "<span class=\"badge-deafened\">&#x1F3A7;</span>" : ""}
+          </div>
+          <div class="voice-card-avatar" style="background-color: ${user.avatarColor}">
+            ${user.avatarInitial || user.username.charAt(0).toUpperCase()}
+          </div>
+          <div class="voice-card-name">${escapeHTML(user.username)}</div>
+          <div class="voice-card-booster ${isBoosted ? 'is-boosted' : ''}" data-user-id="${user.id}">
+            <div class="voice-booster-header">
+              <span class="voice-booster-label">Volume</span>
+              <span class="voice-booster-badge ${isBoosted ? 'boosted' : ''}" id="card-vol-badge-${user.id}">${isBoosted ? '🚀 ' : ''}${userVol}%</span>
+            </div>
+            <div class="voice-booster-controls">
+              <input type="range" min="0" max="300" step="5" value="${userVol}" class="voice-stage-slider" data-user-id="${user.id}" title="User Volume & Voice Boost (0% - 300%)">
+            </div>
+            <div class="voice-booster-quick-row">
+              <button type="button" class="btn-card-boost ${userVol === 100 ? 'active' : ''}" data-user-id="${user.id}" data-val="100" title="Standard 100% Volume">100%</button>
+              <button type="button" class="btn-card-boost ${userVol === 150 ? 'active' : ''}" data-user-id="${user.id}" data-val="150" title="150% Boost">+50%</button>
+              <button type="button" class="btn-card-boost btn-card-superboost ${userVol >= 200 ? 'active' : ''}" data-user-id="${user.id}" data-val="200" title="Toggle 200% Voice Boost">⚡ Boost 200%</button>
+            </div>
+          </div>
+        `;
+
+        const slider = card.querySelector('.voice-stage-slider');
+        if (slider) {
+          slider.oninput = (e) => {
+            e.stopPropagation();
+            setPeerVolume(user.id, Number(e.target.value));
+          };
+          slider.onchange = (e) => {
+            e.stopPropagation();
+            showToast(`Volume for ${user.username} set to ${e.target.value}%`);
+          };
+        }
+
+        card.querySelectorAll('.btn-card-boost').forEach(btn => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const targetVal = Number(btn.getAttribute('data-val'));
+            const current = getPeerVolume(user.id);
+            const newVal = (targetVal === 200 && current >= 200) ? 100 : targetVal;
+            setPeerVolume(user.id, newVal);
+            showToast(newVal > 100 ? `🚀 ${user.username}'s voice boosted to ${newVal}%!` : `Volume for ${user.username} set to 100%`);
+          };
+        });
+
+        card.oncontextmenu = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openUserBoosterPopover(e.clientX, e.clientY, user);
+        };
+      }
+
       el.voiceGridCards.appendChild(card);
     });
   }
@@ -2129,7 +2660,37 @@
       const source = state.testAudioCtx.createMediaStreamSource(state.testStream);
       state.testAnalyser = state.testAudioCtx.createAnalyser();
       state.testAnalyser.fftSize = 256;
-      source.connect(state.testAnalyser);
+
+      if (state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off') {
+        const hp = state.testAudioCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = state.noiseSuppressionPreset === 'aggressive' ? 110 : (state.noiseSuppressionPreset === 'studio' ? 75 : 85);
+        hp.Q.value = 0.707;
+
+        const peak = state.testAudioCtx.createBiquadFilter();
+        peak.type = 'peaking';
+        peak.frequency.value = 2800;
+        peak.gain.value = state.noiseSuppressionPreset === 'aggressive' ? 4.5 : (state.noiseSuppressionPreset === 'studio' ? 2.5 : 3.5);
+        peak.Q.value = 1.2;
+
+        const lp = state.testAudioCtx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = state.noiseSuppressionPreset === 'aggressive' ? 7000 : (state.noiseSuppressionPreset === 'studio' ? 10000 : 8000);
+        lp.Q.value = 0.707;
+
+        const gate = state.testAudioCtx.createGain();
+        gate.gain.value = 1.0;
+
+        source.connect(hp);
+        hp.connect(peak);
+        peak.connect(lp);
+        lp.connect(gate);
+        gate.connect(state.testAnalyser);
+        state.testGate = gate;
+      } else {
+        source.connect(state.testAnalyser);
+        state.testGate = null;
+      }
 
       state.isTestingMic = true;
       if (el.btnTestMic) {
@@ -2144,6 +2705,17 @@
         let sum = 0;
         for (let i = 0; i < buffer.length; i++) sum += buffer[i];
         const avg = sum / buffer.length;
+
+        // Dynamic Voice Gate in Mic Test
+        if (state.testGate && state.testAudioCtx && state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off') {
+          const now = state.testAudioCtx.currentTime;
+          if (avg < state.noiseGateThreshold) {
+            state.testGate.gain.setTargetAtTime(0.01, now, 0.04);
+          } else {
+            state.testGate.gain.setTargetAtTime(1.0, now, 0.005);
+          }
+        }
+
         const percent = Math.min(100, Math.round((avg / 60) * 100));
         if (el.vuMeterFill) el.vuMeterFill.style.width = percent + "%";
         requestAnimationFrame(updateVU);
@@ -2151,12 +2723,13 @@
       updateVU();
     } catch (e) {
       console.error("Mic test error:", e);
-      showToast("?? Could not access microphone for testing.");
+      showToast("Could not access microphone for testing.");
     }
   }
 
   function stopMicTest() {
     state.isTestingMic = false;
+    state.testGate = null;
     if (state.testStream) {
       state.testStream.getTracks().forEach(t => t.stop());
       state.testStream = null;
@@ -2180,6 +2753,7 @@
     });
 
     el.btnDisconnectVoice.onclick = () => handleLeaveVoice(true);
+    if (el.btnToggleNoiseSuppression) el.btnToggleNoiseSuppression.onclick = () => toggleNoiseSuppression();
     el.btnToggleMic.onclick = toggleMute;
     el.btnToggleDeafen.onclick = toggleDeafen;
 
@@ -2305,15 +2879,58 @@
       };
     }
 
-    // Channel Context Menu Handlers
-    window.addEventListener('click', () => closeChannelContextMenu());
-    window.addEventListener('blur', () => closeChannelContextMenu());
+    // Channel Context Menu & User Booster Popover Handlers
+    window.addEventListener('click', (e) => {
+      closeChannelContextMenu();
+      if (el.userVolumeContextMenu && !el.userVolumeContextMenu.classList.contains('hidden')) {
+        if (!el.userVolumeContextMenu.contains(e.target) && !e.target.closest('.btn-user-vol-quick') && !e.target.closest('.voice-card')) {
+          closeUserBoosterPopover();
+        }
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      closeChannelContextMenu();
+      closeUserBoosterPopover();
+    });
+
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeChannelContextMenu();
+        closeUserBoosterPopover();
         closeRenameChannelModal();
         closeCreateChannelModal();
       }
+    });
+
+    // User Booster Popover Slider & Quick Presets
+    if (el.ctxBoosterSlider) {
+      el.ctxBoosterSlider.oninput = (e) => {
+        if (state.activeBoosterTargetUserId) {
+          setPeerVolume(state.activeBoosterTargetUserId, Number(e.target.value));
+        }
+      };
+      el.ctxBoosterSlider.onchange = (e) => {
+        if (state.activeBoosterTargetUserId) {
+          const userObj = state.allUsers.find(u => u.id === state.activeBoosterTargetUserId);
+          const name = userObj ? userObj.username : 'User';
+          showToast(`Volume for ${name} set to ${e.target.value}%`);
+        }
+      };
+    }
+
+    document.querySelectorAll('.btn-booster-preset').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (!state.activeBoosterTargetUserId) return;
+        const targetVal = Number(btn.getAttribute('data-val'));
+        const current = getPeerVolume(state.activeBoosterTargetUserId);
+        const newVal = (targetVal === 200 && current >= 200) ? 100 : targetVal;
+        setPeerVolume(state.activeBoosterTargetUserId, newVal);
+        const userObj = state.allUsers.find(u => u.id === state.activeBoosterTargetUserId);
+        const name = userObj ? userObj.username : 'User';
+        showToast(newVal > 100 ? `🚀 ${name}'s voice boosted to ${newVal}%!` : `Volume for ${name} set to ${newVal}%`);
+      };
     });
 
     if (el.ctxRenameChannel) {
@@ -2594,6 +3211,33 @@
     };
 
     el.btnTestMic.onclick = toggleMicTest;
+
+    if (el.selectNoiseSuppression) {
+      el.selectNoiseSuppression.onchange = (e) => {
+        const val = e.target.value;
+        if (val === 'off') {
+          state.noiseSuppressionEnabled = false;
+        } else {
+          state.noiseSuppressionEnabled = true;
+          state.noiseSuppressionPreset = val;
+          localStorage.setItem('megazacx_noise_suppression_preset', val);
+        }
+        localStorage.setItem('megazacx_noise_suppression', state.noiseSuppressionEnabled ? 'true' : 'false');
+        applyNoiseSuppressionSettings();
+        if (state.isTestingMic) startMicTest();
+      };
+    }
+
+    if (el.sliderNoiseGate) {
+      el.sliderNoiseGate.oninput = (e) => {
+        const val = parseInt(e.target.value, 10) || 12;
+        state.noiseGateThreshold = val;
+        localStorage.setItem('megazacx_noise_gate_threshold', val.toString());
+        if (el.labelNoiseGateVal) {
+          el.labelNoiseGateVal.textContent = val === 0 ? '0 (Off)' : `${val} (${val <= 8 ? 'Sensitive' : val <= 18 ? 'Optimal' : 'Aggressive'})`;
+        }
+      };
+    }
 
     if (el.selectAudioInput) {
       el.selectAudioInput.onchange = (e) => {
@@ -2910,12 +3554,21 @@
     startMicTest,
     stopMicTest,
     handleJoinVoice,
-    handleLeaveVoice
+    handleLeaveVoice,
+    setupVoiceProcessing,
+    applyNoiseSuppressionSettings,
+    toggleNoiseSuppression,
+    getPeerVolume,
+    setPeerVolume,
+    openUserBoosterPopover,
+    closeUserBoosterPopover
   };
 
   window.addEventListener("DOMContentLoaded", () => {
+    loadSavedUserVolumes();
     updateProfileUI();
     setupEvents();
+    applyNoiseSuppressionSettings();
     loadAudioInputDevices();
     initAutoUpdater();
   });

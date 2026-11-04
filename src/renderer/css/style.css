@@ -1004,20 +1004,20 @@ body {
 
 .voice-grid-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 14px;
 }
 
 .voice-card {
   background: var(--bg-panel);
-  border-radius: 10px;
-  height: 140px;
+  border-radius: 12px;
+  min-height: 184px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   position: relative;
-  padding: 12px;
+  padding: 14px 10px 10px 10px;
   border: 2px solid var(--border-subtle);
   transition: all 0.2s ease;
 }
@@ -1028,15 +1028,15 @@ body {
 }
 
 .voice-card-avatar {
-  width: 58px;
-  height: 58px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background: var(--accent-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 22px;
+  font-size: 20px;
   color: #fff;
   transition: all 0.15s ease;
   border: 2px solid transparent;
@@ -1048,7 +1048,7 @@ body {
 }
 
 .voice-card-name {
-  margin-top: 10px;
+  margin-top: 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-header);
@@ -1065,6 +1065,342 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Voice Card Booster Controls */
+.voice-card-booster {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.voice-booster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 2px;
+}
+
+.voice-booster-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.voice-booster-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+.voice-booster-badge.boosted {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
+}
+
+.voice-booster-controls {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.voice-stage-slider {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.14);
+  outline: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.voice-stage-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 2px solid #fff;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.voice-stage-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-cyan);
+}
+
+.voice-card-booster.is-boosted .voice-stage-slider::-webkit-slider-thumb {
+  background: #f59e0b;
+  border-color: #fef08a;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+.voice-booster-quick-row {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.btn-card-boost {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.btn-card-boost:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.btn-card-boost.active {
+  background: rgba(124, 58, 237, 0.3);
+  border-color: var(--accent-primary);
+  color: #c4b5fd;
+}
+
+.btn-card-superboost {
+  flex: 1.4;
+  font-weight: 700;
+}
+
+.btn-card-superboost.active {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #fbbf24;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
+}
+
+.voice-card-self-footer {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+
+.voice-self-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  padding: 2px 8px;
+  border-radius: 12px;
+  display: inline-block;
+}
+
+/* User Volume Button in Sidebar */
+.btn-user-vol-quick {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.15s ease;
+}
+
+.btn-user-vol-quick:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.btn-user-vol-quick.boosted {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+/* User Volume & Voice Booster Popover */
+.user-booster-popover {
+  min-width: 220px;
+  padding: 12px;
+  background: #18191c;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  z-index: 10001;
+}
+
+.booster-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.booster-user-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.booster-user-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+}
+
+.booster-user-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.booster-val-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.booster-val-badge.boosted {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.booster-label-row {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.booster-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.booster-min-max {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.voice-booster-range-slider {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  outline: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.voice-booster-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 2px solid #fff;
+  cursor: pointer;
+}
+
+.booster-presets-row {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-booster-preset {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.btn-booster-preset:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.btn-booster-preset.active {
+  background: rgba(124, 58, 237, 0.35);
+  border-color: var(--accent-primary);
+  color: #c4b5fd;
+}
+
+.btn-preset-boost {
+  flex: 1.5;
+  font-weight: 700;
+}
+
+.btn-preset-boost.active {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #fbbf24;
+}
+
+/* Noise Suppression Toggle Button Styling */
+#btn-toggle-noise-suppression {
+  transition: all 0.2s ease;
+}
+
+#btn-toggle-noise-suppression.active {
+  color: #06B6D4;
+  background: rgba(6, 182, 212, 0.15);
+}
+
+#btn-toggle-noise-suppression:hover {
+  background: rgba(6, 182, 212, 0.25);
+  color: #22D3EE;
 }
 
 /* Messages Scroller */
