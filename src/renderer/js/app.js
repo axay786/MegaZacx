@@ -1039,63 +1039,41 @@
         el.remoteAudioContainer.appendChild(audioElem);
       }
 
-      // Cleanup prior peer Web Audio context if any
-      if (peerEntry.audioCtx) {
+      // Cleanup prior peer Web Audio booster if any
+      if (peerEntry.boostCtx) {
+        try {
+          if (peerEntry.boostCtx.state !== 'closed') peerEntry.boostCtx.close();
+        } catch (e) {}
+        peerEntry.boostCtx = null;
+        peerEntry.boostGain = null;
+        peerEntry.boostSrc = null;
+      }
+      if (peerEntry.audioCtx && peerEntry.audioCtx !== peerEntry.boostCtx) {
         try {
           if (peerEntry.audioCtx.state !== 'closed') peerEntry.audioCtx.close();
         } catch (e) {}
         peerEntry.audioCtx = null;
       }
 
-      // Web Audio Gain Node Voice Booster Pipeline (0% - 300% boost)
-      try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
-        const source = audioCtx.createMediaStreamSource(stream);
-        const gainNode = audioCtx.createGain();
-
-        const currentVol = getPeerVolume(peerId);
-        gainNode.gain.value = currentVol / 100;
-
-        // Dynamics limiter to prevent harsh clipping when boosted beyond 100%
-        const limiter = audioCtx.createDynamicsCompressor();
-        limiter.threshold.value = -3.0;
-        limiter.knee.value = 4.0;
-        limiter.ratio.value = 12.0;
-        limiter.attack.value = 0.002;
-        limiter.release.value = 0.05;
-
-        const dest = audioCtx.createMediaStreamDestination();
-        source.connect(gainNode);
-        gainNode.connect(limiter);
-        limiter.connect(dest);
-
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 128;
-        source.connect(analyser);
-
-        peerEntry.audioCtx = audioCtx;
-        peerEntry.gainNode = gainNode;
-        peerEntry.analyser = analyser;
-        peerEntry.volumePercent = currentVol;
-
-        audioElem.srcObject = dest.stream;
-      } catch (boostErr) {
-        console.warn("[WebRTC] Voice booster AudioContext fallback to direct stream:", boostErr);
-        audioElem.srcObject = stream;
-      }
-
-      audioElem.volume = 1.0;
+      // CRITICAL: Attach the genuine remote WebRTC MediaStream directly to the HTMLAudioElement
+      // to guarantee Chromium's WebRTC audio decoding pipeline clocks RTP packets and plays immediately
+      audioElem.srcObject = stream;
       audioElem.muted = state.currentUser.isDeafened;
       if (state.selectedAudioOutput && typeof audioElem.setSinkId === 'function') {
         audioElem.setSinkId(state.selectedAudioOutput).catch(() => {});
       }
       peerEntry.audioElem = audioElem;
 
+      // Always explicitly trigger playback to satisfy autoplay policies
       audioElem.play().then(() => {
         console.log("[WebRTC] Audio playback started for peer:", peerId);
       }).catch(err => {
         console.warn("[WebRTC] Audio play error:", err);
       });
+
+      // Apply saved or current volume (0% - 300%)
+      const currentVol = getPeerVolume(peerId);
+      applyPeerVolumeToAudio(peerEntry, currentVol);
 
       setupRemoteAudioVAD(peerId, stream);
     };
@@ -1184,6 +1162,14 @@
         clearInterval(peer.vadInterval);
         peer.vadInterval = null;
       }
+      if (peer.boostCtx) {
+        try {
+          if (peer.boostCtx.state !== 'closed') peer.boostCtx.close();
+        } catch (e) {}
+        peer.boostCtx = null;
+        peer.boostGain = null;
+        peer.boostSrc = null;
+      }
       if (peer.audioCtx) {
         try {
           if (peer.audioCtx.state !== 'closed') peer.audioCtx.close();
@@ -1216,6 +1202,9 @@
         const targetStream = stream || peer.stream;
         if (!targetStream) return;
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
         const source = audioCtx.createMediaStreamSource(targetStream);
         analyser = audioCtx.createAnalyser();
         analyser.fftSize = 128;
@@ -1303,6 +1292,71 @@
     return 100;
   }
 
+  function applyPeerVolumeToAudio(peerEntry, volumePercent) {
+    if (!peerEntry || !peerEntry.audioElem) return;
+    peerEntry.volumePercent = volumePercent;
+
+    if (volumePercent <= 100) {
+      // Direct native playback on audioElem
+      if (peerEntry.boostGain && peerEntry.boostCtx) {
+        try {
+          peerEntry.boostGain.gain.setValueAtTime(0, peerEntry.boostCtx.currentTime);
+          peerEntry.boostGain.gain.value = 0;
+        } catch (e) {}
+      }
+      peerEntry.audioElem.volume = state.currentUser.isDeafened ? 0 : (volumePercent / 100);
+      peerEntry.audioElem.muted = state.currentUser.isDeafened;
+    } else {
+      // Boosted beyond 100% (101% to 300%) using Web Audio Gain + Dynamics Limiter
+      try {
+        if (!peerEntry.boostCtx && peerEntry.stream) {
+          const boostCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+          if (boostCtx.state === 'suspended') {
+            boostCtx.resume().catch(() => {});
+          }
+          if (state.selectedAudioOutput && typeof boostCtx.setSinkId === 'function') {
+            boostCtx.setSinkId(state.selectedAudioOutput).catch(() => {});
+          }
+          const srcNode = boostCtx.createMediaStreamSource(peerEntry.stream);
+          const boostGain = boostCtx.createGain();
+          const limiter = boostCtx.createDynamicsCompressor();
+          limiter.threshold.value = -3.0;
+          limiter.knee.value = 4.0;
+          limiter.ratio.value = 12.0;
+          limiter.attack.value = 0.002;
+          limiter.release.value = 0.05;
+
+          srcNode.connect(boostGain);
+          boostGain.connect(limiter);
+          limiter.connect(boostCtx.destination);
+
+          peerEntry.boostCtx = boostCtx;
+          peerEntry.boostGain = boostGain;
+          peerEntry.boostSrc = srcNode;
+          peerEntry.gainNode = boostGain;
+          peerEntry.audioCtx = boostCtx;
+        }
+
+        if (peerEntry.boostCtx && peerEntry.boostGain) {
+          if (peerEntry.boostCtx.state === 'suspended') {
+            peerEntry.boostCtx.resume().catch(() => {});
+          }
+          const gainVal = state.currentUser.isDeafened ? 0 : (volumePercent / 100);
+          peerEntry.boostGain.gain.setValueAtTime(gainVal, peerEntry.boostCtx.currentTime);
+          peerEntry.boostGain.gain.value = gainVal;
+
+          // Mute raw audioElem so the user only hears the boosted WebAudio output without duplicate echo
+          peerEntry.audioElem.volume = 0;
+        } else {
+          peerEntry.audioElem.volume = 1.0;
+        }
+      } catch (err) {
+        console.warn("[WebRTC] Boost fallback to direct audio volume:", err);
+        peerEntry.audioElem.volume = 1.0;
+      }
+    }
+  }
+
   function setPeerVolume(userId, volumePercent) {
     const clamped = Math.max(0, Math.min(300, Math.round(Number(volumePercent) || 100)));
 
@@ -1319,14 +1373,16 @@
     } catch (e) {}
 
     const peerEntry = state.peers.get(userId);
-    if (peerEntry && peerEntry.gainNode && peerEntry.audioCtx) {
-      if (peerEntry.audioCtx.state === 'suspended') {
-        peerEntry.audioCtx.resume().catch(() => {});
+    if (peerEntry) {
+      if (peerEntry.gainNode && peerEntry.audioCtx) {
+        if (peerEntry.audioCtx.state === 'suspended') {
+          peerEntry.audioCtx.resume().catch(() => {});
+        }
+        const gainVal = clamped / 100;
+        peerEntry.gainNode.gain.setValueAtTime(gainVal, peerEntry.audioCtx.currentTime);
+        peerEntry.gainNode.gain.value = gainVal;
       }
-      const gainVal = clamped / 100;
-      peerEntry.gainNode.gain.setValueAtTime(gainVal, peerEntry.audioCtx.currentTime);
-      peerEntry.gainNode.gain.value = gainVal;
-      peerEntry.volumePercent = clamped;
+      applyPeerVolumeToAudio(peerEntry, clamped);
     }
 
     updatePeerVolumeUI(userId, clamped);
@@ -1578,6 +1634,27 @@
         compressor.ratio.value = 4;
       }
     }
+
+    // Dynamically apply native WebRTC noise suppression constraints to active mic track
+    const useNoiseSuppression = isEnabled && preset !== 'off';
+    const useAGC = useNoiseSuppression && preset !== 'studio';
+    const activeStream = state.localStream || state.rawMicStream;
+    if (activeStream) {
+      activeStream.getAudioTracks().forEach(track => {
+        if (typeof track.applyConstraints === 'function') {
+          track.applyConstraints({
+            noiseSuppression: useNoiseSuppression,
+            echoCancellation: useNoiseSuppression,
+            autoGainControl: useAGC,
+            googNoiseSuppression: useNoiseSuppression,
+            googHighpassFilter: useNoiseSuppression,
+            googTypingNoiseDetection: useNoiseSuppression
+          }).catch(err => {
+            console.warn("[Audio] Could not apply dynamic noise suppression constraints:", err);
+          });
+        }
+      });
+    }
   }
 
   function toggleNoiseSuppression(forceState = null) {
@@ -1593,15 +1670,17 @@
 
   // Bulletproof Multi-Device Microphone Stream Resolution
   async function getMicrophoneStream(preferredDeviceId) {
+    const isNSEnabled = state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off';
+    const useAGC = isNSEnabled && state.noiseSuppressionPreset !== 'studio';
     const baseAudioConstraints = {
       echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
+      noiseSuppression: isNSEnabled,
+      autoGainControl: useAGC,
       googEchoCancellation: true,
-      googAutoGainControl: true,
-      googNoiseSuppression: true,
-      googHighpassFilter: true,
-      googTypingNoiseDetection: true
+      googAutoGainControl: useAGC,
+      googNoiseSuppression: isNSEnabled,
+      googHighpassFilter: isNSEnabled,
+      googTypingNoiseDetection: isNSEnabled
     };
 
     // Strategy 1: Request preferred device using { ideal: preferredDeviceId }
@@ -1650,51 +1729,49 @@
       } catch (e) {}
     }
 
-    state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-    const source = state.audioContext.createMediaStreamSource(state.rawMicStream || state.localStream);
-    state.analyser = state.audioContext.createAnalyser();
-    state.analyser.fftSize = 128;
-    source.connect(state.analyser);
-
-    const buffer = new Uint8Array(state.analyser.frequencyBinCount);
-
-    if (state.vadInterval) clearInterval(state.vadInterval);
-    state.vadInterval = setInterval(() => {
-      if (!state.localStream || state.currentUser.isMuted) {
-        if (state.currentUser.isSpeaking) {
-          setLocalSpeaking(false);
-        }
-        return;
+    try {
+      state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      if (state.audioContext.state === 'suspended') {
+        state.audioContext.resume().catch(() => {});
       }
+      const source = state.audioContext.createMediaStreamSource(state.rawMicStream || state.localStream);
+      state.analyser = state.audioContext.createAnalyser();
+      state.analyser.fftSize = 128;
+      source.connect(state.analyser);
 
-      state.analyser.getByteFrequencyData(buffer);
-      let sum = 0;
-      for (let i = 0; i < buffer.length; i++) sum += buffer[i];
-      const avg = sum / buffer.length;
+      const buffer = new Uint8Array(state.analyser.frequencyBinCount);
 
-      // Real-time Dynamic Voice Gate (Downward Expander)
-      if (state.voiceProc && state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off') {
-        const gateThresh = state.noiseGateThreshold || 12;
-        const now = state.voiceProc.audioCtx.currentTime;
-        if (avg < gateThresh) {
-          state.voiceProc.gateGain.gain.setTargetAtTime(0.01, now, 0.04);
-          state.voiceProc.isGated = true;
-        } else {
-          state.voiceProc.gateGain.gain.setTargetAtTime(1.0, now, 0.005);
-          state.voiceProc.isGated = false;
+      if (state.vadInterval) clearInterval(state.vadInterval);
+      state.vadInterval = setInterval(() => {
+        if (!state.localStream || state.currentUser.isMuted) {
+          if (state.currentUser.isSpeaking) {
+            setLocalSpeaking(false);
+          }
+          return;
         }
-      }
 
-      if (avg >= state.vadThreshold) {
-        if (!state.currentUser.isSpeaking) {
-          setLocalSpeaking(true);
+        if (state.audioContext && state.audioContext.state === 'suspended') {
+          state.audioContext.resume().catch(() => {});
         }
-        if (state.speakingTimeout) clearTimeout(state.speakingTimeout);
-        state.speakingTimeout = setTimeout(() => {
-          setLocalSpeaking(false);
-        }, 350);
-      }
-    }, 120);
+
+        state.analyser.getByteFrequencyData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+        const avg = sum / buffer.length;
+
+        if (avg >= state.vadThreshold) {
+          if (!state.currentUser.isSpeaking) {
+            setLocalSpeaking(true);
+          }
+          if (state.speakingTimeout) clearTimeout(state.speakingTimeout);
+          state.speakingTimeout = setTimeout(() => {
+            setLocalSpeaking(false);
+          }, 350);
+        }
+      }, 120);
+    } catch (e) {
+      console.warn("[Audio] Local VAD error:", e);
+    }
   }
 
   // Local Voice Capture & VAD with Multi-Device Support
@@ -1712,17 +1789,22 @@
         throw new Error("No active audio stream could be captured");
       }
 
-      // Route raw microphone through real-time Web Audio Noise Suppression & Voice Focus DSP
-      const processedStream = setupVoiceProcessing(rawStream) || rawStream;
-      state.localStream = processedStream;
+      // CRITICAL: WebRTC transport MUST send the genuine hardware MediaStream
+      // to ensure native WebRTC C++ APM (AEC, NS, AGC) and hardware clocking
+      state.localStream = rawStream;
+
+      // Initialize voice processing DSP node references for local monitoring
+      setupVoiceProcessing(rawStream);
 
       // Ensure initial track mute state matches currentUser.isMuted
       state.localStream.getAudioTracks().forEach(track => {
         track.enabled = !state.currentUser.isMuted;
       });
-      state.rawMicStream.getAudioTracks().forEach(track => {
-        track.enabled = !state.currentUser.isMuted;
-      });
+      if (state.rawMicStream) {
+        state.rawMicStream.getAudioTracks().forEach(track => {
+          track.enabled = !state.currentUser.isMuted;
+        });
+      }
 
       setupLocalVAD();
 
@@ -1767,11 +1849,11 @@
         const rawNewStream = await getMicrophoneStream(newDeviceId);
         if (!rawNewStream) return;
         state.rawMicStream = rawNewStream;
+        state.localStream = rawNewStream;
 
-        const processedNewStream = setupVoiceProcessing(rawNewStream) || rawNewStream;
-        state.localStream = processedNewStream;
+        setupVoiceProcessing(rawNewStream);
 
-        const newTrack = processedNewStream.getAudioTracks()[0];
+        const newTrack = rawNewStream.getAudioTracks()[0];
         if (newTrack) {
           newTrack.enabled = !state.currentUser.isMuted;
         }
@@ -1957,6 +2039,13 @@
     for (const [, peer] of state.peers.entries()) {
       if (peer.audioElem) {
         peer.audioElem.muted = state.currentUser.isDeafened;
+      }
+      if (peer.boostGain && peer.boostCtx) {
+        try {
+          const val = state.currentUser.isDeafened ? 0 : ((peer.volumePercent || 100) / 100);
+          peer.boostGain.gain.setValueAtTime(val, peer.boostCtx.currentTime);
+          peer.boostGain.gain.value = val;
+        } catch (e) {}
       }
     }
 
@@ -2638,6 +2727,11 @@
         }
       }
     }
+    for (const [, peer] of state.peers.entries()) {
+      if (peer.boostCtx && typeof peer.boostCtx.setSinkId === 'function') {
+        peer.boostCtx.setSinkId(deviceId || '').catch(() => {});
+      }
+    }
     const selectedOption = el.selectAudioOutput ? el.selectAudioOutput.options[el.selectAudioOutput.selectedIndex] : null;
     const outLabel = selectedOption ? selectedOption.textContent : "Output Device";
     showToast("? Audio output set to " + outLabel);
@@ -2657,6 +2751,9 @@
       const deviceId = el.selectAudioInput ? el.selectAudioInput.value : '';
       state.testStream = await getMicrophoneStream(deviceId);
       state.testAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (state.testAudioCtx.state === 'suspended') {
+        state.testAudioCtx.resume().catch(() => {});
+      }
       const source = state.testAudioCtx.createMediaStreamSource(state.testStream);
       state.testAnalyser = state.testAudioCtx.createAnalyser();
       state.testAnalyser.fftSize = 256;
@@ -2678,18 +2775,12 @@
         lp.frequency.value = state.noiseSuppressionPreset === 'aggressive' ? 7000 : (state.noiseSuppressionPreset === 'studio' ? 10000 : 8000);
         lp.Q.value = 0.707;
 
-        const gate = state.testAudioCtx.createGain();
-        gate.gain.value = 1.0;
-
         source.connect(hp);
         hp.connect(peak);
         peak.connect(lp);
-        lp.connect(gate);
-        gate.connect(state.testAnalyser);
-        state.testGate = gate;
+        lp.connect(state.testAnalyser);
       } else {
         source.connect(state.testAnalyser);
-        state.testGate = null;
       }
 
       state.isTestingMic = true;
@@ -2705,16 +2796,6 @@
         let sum = 0;
         for (let i = 0; i < buffer.length; i++) sum += buffer[i];
         const avg = sum / buffer.length;
-
-        // Dynamic Voice Gate in Mic Test
-        if (state.testGate && state.testAudioCtx && state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off') {
-          const now = state.testAudioCtx.currentTime;
-          if (avg < state.noiseGateThreshold) {
-            state.testGate.gain.setTargetAtTime(0.01, now, 0.04);
-          } else {
-            state.testGate.gain.setTargetAtTime(1.0, now, 0.005);
-          }
-        }
 
         const percent = Math.min(100, Math.round((avg / 60) * 100));
         if (el.vuMeterFill) el.vuMeterFill.style.width = percent + "%";
