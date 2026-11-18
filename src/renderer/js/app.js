@@ -48,6 +48,7 @@
     noiseSuppressionEnabled: localStorage.getItem('megazacx_noise_suppression') !== 'false',
     noiseSuppressionPreset: localStorage.getItem('megazacx_noise_suppression_preset') || 'balanced',
     noiseGateThreshold: parseInt(localStorage.getItem('megazacx_noise_gate_threshold'), 10) || 12,
+    micInputVolume: parseInt(localStorage.getItem('megazacx_mic_volume'), 10) || 100,
     rawMicStream: null,
     processedMicStream: null,
     voiceProc: null,
@@ -200,6 +201,8 @@
     btnCloseSettings: document.getElementById('btn-close-settings'),
     selectAudioInput: document.getElementById('select-audio-input'),
     selectAudioOutput: document.getElementById('select-audio-output'),
+    sliderMicVolume: document.getElementById('slider-mic-volume'),
+    labelMicVolumeVal: document.getElementById('label-mic-volume-val'),
     selectNoiseSuppression: document.getElementById('select-noise-suppression'),
     badgeNoiseSuppression: document.getElementById('badge-noise-suppression'),
     sliderNoiseGate: document.getElementById('slider-noise-gate'),
@@ -991,6 +994,22 @@
     initSocket(localUrl);
   }
 
+  // Optimize Opus SDP: 128 kbps constant bitrate, disable DTX (prevents syllable dropouts), enable inband FEC
+  function optimizeOpusSdp(sdp) {
+    if (!sdp) return sdp;
+    return sdp.replace(/a=fmtp:(\d+)\s+([^\r\n]+)/g, (match, pt, params) => {
+      if (sdp.includes(`a=rtpmap:${pt} opus/48000`)) {
+        let p = params;
+        if (!p.includes('maxaveragebitrate=')) p += ';maxaveragebitrate=128000';
+        if (!p.includes('cbr=')) p += ';cbr=1';
+        if (!p.includes('useinbandfec=')) p += ';useinbandfec=1';
+        if (!p.includes('usedtx=')) p += ';usedtx=0';
+        return `a=fmtp:${pt} ${p}`;
+      }
+      return match;
+    });
+  }
+
   // WebRTC Peer Connection Core (with ICE Candidate Queue)
   async function initPeerConnection(peerId, isInitiator) {
     if (state.peers.has(peerId)) {
@@ -1087,11 +1106,15 @@
     if (isInitiator) {
       try {
         const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        const optimizedOffer = {
+          type: offer.type,
+          sdp: optimizeOpusSdp(offer.sdp)
+        };
+        await pc.setLocalDescription(optimizedOffer);
         state.socket.emit("webrtc-signal", {
           targetPeerId: peerId,
           signalType: "offer",
-          signalData: offer
+          signalData: optimizedOffer
         });
       } catch (err) {
         console.error("[WebRTC] Offer error:", err);
@@ -1120,11 +1143,15 @@
       }
 
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      const optimizedAnswer = {
+        type: answer.type,
+        sdp: optimizeOpusSdp(answer.sdp)
+      };
+      await pc.setLocalDescription(optimizedAnswer);
       state.socket.emit("webrtc-signal", {
         targetPeerId: senderId,
         signalType: "answer",
-        signalData: answer
+        signalData: optimizedAnswer
       });
     } else if (type === "answer") {
       if (pc) {
@@ -1307,7 +1334,7 @@
       peerEntry.audioElem.volume = state.currentUser.isDeafened ? 0 : (volumePercent / 100);
       peerEntry.audioElem.muted = state.currentUser.isDeafened;
     } else {
-      // Boosted beyond 100% (101% to 300%) using Web Audio Gain + Dynamics Limiter
+      // Boosted beyond 100% (101% to 300%) using Web Audio Gain + Soft Limiter
       try {
         if (!peerEntry.boostCtx && peerEntry.stream) {
           const boostCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
@@ -1320,11 +1347,11 @@
           const srcNode = boostCtx.createMediaStreamSource(peerEntry.stream);
           const boostGain = boostCtx.createGain();
           const limiter = boostCtx.createDynamicsCompressor();
-          limiter.threshold.value = -3.0;
-          limiter.knee.value = 4.0;
-          limiter.ratio.value = 12.0;
-          limiter.attack.value = 0.002;
-          limiter.release.value = 0.05;
+          limiter.threshold.value = -0.5;
+          limiter.knee.value = 8.0;
+          limiter.ratio.value = 2.0;
+          limiter.attack.value = 0.005;
+          limiter.release.value = 0.1;
 
           srcNode.connect(boostGain);
           boostGain.connect(limiter);
@@ -1340,6 +1367,9 @@
         if (peerEntry.boostCtx && peerEntry.boostGain) {
           if (peerEntry.boostCtx.state === 'suspended') {
             peerEntry.boostCtx.resume().catch(() => {});
+          }
+          if (state.selectedAudioOutput && typeof peerEntry.boostCtx.setSinkId === 'function' && peerEntry.boostCtx.sinkId !== state.selectedAudioOutput) {
+            peerEntry.boostCtx.setSinkId(state.selectedAudioOutput).catch(() => {});
           }
           const gainVal = state.currentUser.isDeafened ? 0 : (volumePercent / 100);
           peerEntry.boostGain.gain.setValueAtTime(gainVal, peerEntry.boostCtx.currentTime);
@@ -1372,7 +1402,15 @@
       localStorage.setItem('megazacx_user_volumes', JSON.stringify(savedMap));
     } catch (e) {}
 
-    const peerEntry = state.peers.get(userId);
+    let peerEntry = state.peers.get(userId);
+    if (!peerEntry) {
+      for (const [pId, p] of state.peers.entries()) {
+        if (p.userId === userId || p.accountId === userId || pId === userId) {
+          peerEntry = p;
+          break;
+        }
+      }
+    }
     if (peerEntry) {
       if (peerEntry.gainNode && peerEntry.audioCtx) {
         if (peerEntry.audioCtx.state === 'suspended') {
@@ -1637,17 +1675,16 @@
 
     // Dynamically apply native WebRTC noise suppression constraints to active mic track
     const useNoiseSuppression = isEnabled && preset !== 'off';
-    const useAGC = useNoiseSuppression && preset !== 'studio';
     const activeStream = state.localStream || state.rawMicStream;
     if (activeStream) {
       activeStream.getAudioTracks().forEach(track => {
         if (typeof track.applyConstraints === 'function') {
           track.applyConstraints({
             noiseSuppression: useNoiseSuppression,
-            echoCancellation: useNoiseSuppression,
-            autoGainControl: useAGC,
+            echoCancellation: true,
+            autoGainControl: true,
             googNoiseSuppression: useNoiseSuppression,
-            googHighpassFilter: useNoiseSuppression,
+            googHighpassFilter: false,
             googTypingNoiseDetection: useNoiseSuppression
           }).catch(err => {
             console.warn("[Audio] Could not apply dynamic noise suppression constraints:", err);
@@ -1671,15 +1708,14 @@
   // Bulletproof Multi-Device Microphone Stream Resolution
   async function getMicrophoneStream(preferredDeviceId) {
     const isNSEnabled = state.noiseSuppressionEnabled && state.noiseSuppressionPreset !== 'off';
-    const useAGC = isNSEnabled && state.noiseSuppressionPreset !== 'studio';
     const baseAudioConstraints = {
       echoCancellation: true,
       noiseSuppression: isNSEnabled,
-      autoGainControl: useAGC,
+      autoGainControl: true,
       googEchoCancellation: true,
-      googAutoGainControl: useAGC,
+      googAutoGainControl: true,
       googNoiseSuppression: isNSEnabled,
-      googHighpassFilter: isNSEnabled,
+      googHighpassFilter: false,
       googTypingNoiseDetection: isNSEnabled
     };
 
@@ -3306,6 +3342,19 @@
         localStorage.setItem('megazacx_noise_suppression', state.noiseSuppressionEnabled ? 'true' : 'false');
         applyNoiseSuppressionSettings();
         if (state.isTestingMic) startMicTest();
+      };
+    }
+
+    if (el.sliderMicVolume) {
+      el.sliderMicVolume.value = state.micInputVolume;
+      if (el.labelMicVolumeVal) el.labelMicVolumeVal.textContent = `${state.micInputVolume}%`;
+      el.sliderMicVolume.oninput = (e) => {
+        const val = parseInt(e.target.value, 10) || 100;
+        state.micInputVolume = val;
+        localStorage.setItem('megazacx_mic_volume', val.toString());
+        if (el.labelMicVolumeVal) {
+          el.labelMicVolumeVal.textContent = `${val}%`;
+        }
       };
     }
 

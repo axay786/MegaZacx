@@ -1,7 +1,7 @@
 {
-  "version": "1.0.9",
+  "version": "1.0.10",
   "commit": "HEAD",
   "name": "MegaZacx",
-  "updatedAt": "2026-11-06T06:55:00.000Z",
-  "releaseNotes": "Fix two-way WebRTC audio deadlock & voice muting: restore direct hardware MediaStream transmission with native WebRTC APM noise suppression, eliminate downward expander voice mute on speech pauses, and implement hybrid native/WebAudio per-user voice booster up to 300% without remote audio stalling"
+  "updatedAt": "2026-11-18T14:55:00.000Z",
+  "releaseNotes": "Fix low voice transmission and unresponsive voice booster: enable native WebRTC AGC, preserve fundamental vocal frequencies (<200Hz), optimize Opus SDP to 128kbps CBR without DTX dropouts, replace crushing 12:1 compressor with high-headroom soft limiter, sync booster setSinkId, and add Microphone Input Volume preamp gain slider"
 }
