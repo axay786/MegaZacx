@@ -24,6 +24,10 @@
     },
     activeTextChannel: 'general',
     activeVoiceChannel: null,
+    reconnectVoiceChannel: null,
+    voiceDisconnectTimeout: null,
+    voiceKeepAliveInterval: null,
+    isReconnectingSocket: false,
     channels: { text: [], voice: [] },
     allUsers: [],
     messages: {},
@@ -417,7 +421,7 @@
   }
 
   function onAuthSuccess(user, token, showFeedback = false) {
-    state.currentUser.id = user.id;
+    state.currentUser.id = (state.socket && state.socket.id) || state.currentUser.id || user.id;
     state.currentUser.accountId = user.id;
     state.currentUser.username = user.username;
     state.currentUser.avatarColor = user.avatarColor || "#7C3AED";
@@ -835,16 +839,44 @@
     el.serverStatusText.textContent = isLocal ? `Hosting (:3888)` : `Connected: ${socketTarget.replace(/^https?:\/\//, "")}`;
 
     state.socket = io(socketTarget, {
-      reconnectionAttempts: 10,
-      timeout: 10000
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+      transports: ['websocket', 'polling']
     });
 
     state.socket.on("connect", () => {
       console.log("[MegaZacx] Connected to server, socket ID:", state.socket.id);
       el.serverStatusText.textContent = isLocal ? `Hosting (:3888)` : `Online: ${socketTarget.replace(/^https?:\/\//, "")}`;
       el.netServerIp.textContent = socketTarget;
+      state.isReconnectingSocket = false;
 
+      if (state.voiceDisconnectTimeout) {
+        clearTimeout(state.voiceDisconnectTimeout);
+        state.voiceDisconnectTimeout = null;
+      }
+
+      state.currentUser.id = state.socket.id;
       authenticateActiveSession();
+
+      // Seamless Auto-Rejoin: If previously in a voice channel, restore presence immediately
+      if (state.reconnectVoiceChannel) {
+        const targetChannel = state.reconnectVoiceChannel;
+        console.log("[MegaZacx] Auto-reconnecting to voice channel:", targetChannel);
+        setTimeout(() => {
+          if (state.socket && state.socket.connected && state.reconnectVoiceChannel === targetChannel) {
+            state.socket.emit("join-voice", { channelId: targetChannel });
+            state.activeVoiceChannel = targetChannel;
+            state.currentUser.voiceChannel = targetChannel;
+            startVoiceKeepAlive();
+            renderVoiceStage();
+            renderChannels();
+            showToast("✓ Voice reconnected automatically!");
+          }
+        }, 300);
+      }
     });
 
     state.socket.on("init-success", (data) => {
@@ -855,6 +887,13 @@
       if (data.currentUser.avatarColor) state.currentUser.avatarColor = data.currentUser.avatarColor;
       state.currentUser.avatarInitial = data.currentUser.avatarInitial || (data.currentUser.username ? data.currentUser.username[0].toUpperCase() : "G");
       updateProfileUI();
+
+      // Ensure active voice channel state is maintained across init-success
+      if (state.reconnectVoiceChannel && state.socket && state.socket.connected) {
+        state.socket.emit("join-voice", { channelId: state.reconnectVoiceChannel });
+        state.activeVoiceChannel = state.reconnectVoiceChannel;
+        state.currentUser.voiceChannel = state.reconnectVoiceChannel;
+      }
 
       state.channels = data.channels;
       applySavedChannelRenames(state.channels);
@@ -967,9 +1006,31 @@
       renderChannels();
     });
 
-    state.socket.on("disconnect", () => {
-      el.serverStatusText.textContent = "Disconnected";
-      handleLeaveVoice(false);
+    state.socket.on("disconnect", (reason) => {
+      console.warn("[MegaZacx] Socket disconnected, reason:", reason);
+      el.serverStatusText.textContent = "Reconnecting...";
+      state.isReconnectingSocket = true;
+
+      // Remember active voice channel for automatic re-joining
+      if (state.activeVoiceChannel) {
+        state.reconnectVoiceChannel = state.activeVoiceChannel;
+      }
+
+      // Clean up stale peer connections (peer socket IDs will change upon reconnect)
+      for (const [id] of state.peers.entries()) {
+        closePeer(id);
+      }
+
+      // Grace period: allow 20 seconds for auto-reconnection before tearing down local audio
+      if (state.voiceDisconnectTimeout) clearTimeout(state.voiceDisconnectTimeout);
+      state.voiceDisconnectTimeout = setTimeout(() => {
+        if (!state.socket || !state.socket.connected) {
+          console.warn("[MegaZacx] Socket reconnect grace period expired, leaving voice room");
+          el.serverStatusText.textContent = "Disconnected";
+          handleLeaveVoice(false);
+          state.reconnectVoiceChannel = null;
+        }
+      }, 20000);
     });
 
     state.socket.on("connect_error", (err) => {
@@ -1024,7 +1085,8 @@
       isSpeaking: false,
       isMuted: false,
       isDeafened: false,
-      candidateQueue: []
+      candidateQueue: [],
+      disconnectTimeout: null
     };
     state.peers.set(peerId, peerEntry);
 
@@ -1098,7 +1160,27 @@
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
+      console.log(`[WebRTC] Peer ${peerId} connectionState changed to:`, pc.connectionState);
+      if (pc.connectionState === "disconnected") {
+        // Disconnected is a transient state in WebRTC - allow 8s grace period for ICE self-healing
+        if (!peerEntry.disconnectTimeout) {
+          peerEntry.disconnectTimeout = setTimeout(() => {
+            if (peerEntry.pc && (peerEntry.pc.connectionState === "disconnected" || peerEntry.pc.connectionState === "failed")) {
+              console.warn(`[WebRTC] Peer ${peerId} failed to recover from disconnected state, closing peer...`);
+              closePeer(peerId);
+            }
+          }, 8000);
+        }
+      } else if (pc.connectionState === "connected") {
+        if (peerEntry.disconnectTimeout) {
+          clearTimeout(peerEntry.disconnectTimeout);
+          peerEntry.disconnectTimeout = null;
+        }
+      } else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        if (peerEntry.disconnectTimeout) {
+          clearTimeout(peerEntry.disconnectTimeout);
+          peerEntry.disconnectTimeout = null;
+        }
         closePeer(peerId);
       }
     };
@@ -1185,6 +1267,10 @@
   function closePeer(peerId) {
     const peer = state.peers.get(peerId);
     if (peer) {
+      if (peer.disconnectTimeout) {
+        clearTimeout(peer.disconnectTimeout);
+        peer.disconnectTimeout = null;
+      }
       if (peer.vadInterval) {
         clearInterval(peer.vadInterval);
         peer.vadInterval = null;
@@ -1992,8 +2078,12 @@
   async function handleJoinVoice(channelId) {
     if (state.activeVoiceChannel === channelId) return;
 
+    state.reconnectVoiceChannel = channelId;
     const stream = await startLocalAudio();
-    if (!stream) return;
+    if (!stream) {
+      state.reconnectVoiceChannel = null;
+      return;
+    }
 
     playSound("join");
     state.activeVoiceChannel = channelId;
@@ -2007,16 +2097,26 @@
     el.stageRoomName.textContent = roomName;
     el.voiceStage.classList.remove("hidden");
 
-    state.socket.emit("join-voice", { channelId });
+    if (state.socket && state.socket.connected) {
+      state.socket.emit("join-voice", { channelId });
+    }
+    startVoiceKeepAlive();
     renderVoiceStage();
     renderChannels();
   }
 
   function handleLeaveVoice(notifyServer = true) {
-    if (!state.activeVoiceChannel) return;
+    if (!state.activeVoiceChannel && !state.reconnectVoiceChannel) return;
+
+    state.reconnectVoiceChannel = null;
+    if (state.voiceDisconnectTimeout) {
+      clearTimeout(state.voiceDisconnectTimeout);
+      state.voiceDisconnectTimeout = null;
+    }
+    stopVoiceKeepAlive();
 
     playSound("leave");
-    if (notifyServer && state.socket) {
+    if (notifyServer && state.socket && state.socket.connected) {
       state.socket.emit("leave-voice");
     }
 
@@ -2033,6 +2133,22 @@
 
     renderVoiceStage();
     renderChannels();
+  }
+
+  function startVoiceKeepAlive() {
+    stopVoiceKeepAlive();
+    state.voiceKeepAliveInterval = setInterval(() => {
+      if (state.activeVoiceChannel && state.socket && state.socket.connected) {
+        state.socket.emit("voice-ping", { channelId: state.activeVoiceChannel }, () => {});
+      }
+    }, 25000);
+  }
+
+  function stopVoiceKeepAlive() {
+    if (state.voiceKeepAliveInterval) {
+      clearInterval(state.voiceKeepAliveInterval);
+      state.voiceKeepAliveInterval = null;
+    }
   }
 
   function toggleMute() {
@@ -3685,6 +3801,9 @@
     stopMicTest,
     handleJoinVoice,
     handleLeaveVoice,
+    startVoiceKeepAlive,
+    stopVoiceKeepAlive,
+    initSocket,
     setupVoiceProcessing,
     applyNoiseSuppressionSettings,
     toggleNoiseSuppression,

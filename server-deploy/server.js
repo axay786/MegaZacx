@@ -60,7 +60,11 @@ function createServer(port = 3888, customAuthManager = null) {
     cors: {
       origin: '*',
       methods: ['GET', 'POST']
-    }
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    connectTimeout: 30000,
+    transports: ['websocket', 'polling']
   });
 
   const rendererPath = path.join(__dirname, '..', 'renderer');
@@ -422,6 +426,13 @@ function createServer(port = 3888, customAuthManager = null) {
 
       socket.to(currentChannel).emit('peer-left-voice', { peerId: socket.id });
       io.emit('users-update', Array.from(connectedUsers.values()));
+    });
+
+    // Voice & Signaling Keep-Alive Heartbeat (prevents proxy & NAT idle timeout)
+    socket.on('voice-ping', (data, callback) => {
+      if (typeof callback === 'function') {
+        callback({ pong: true, timestamp: Date.now() });
+      }
     });
 
         socket.on('webrtc-signal', (data) => {

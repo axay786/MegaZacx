@@ -1,7 +1,7 @@
 {
-  "version": "1.0.10",
+  "version": "1.0.11",
   "commit": "HEAD",
   "name": "MegaZacx",
-  "updatedAt": "2026-11-18T14:55:00.000Z",
-  "releaseNotes": "Fix low voice transmission and unresponsive voice booster: enable native WebRTC AGC, preserve fundamental vocal frequencies (<200Hz), optimize Opus SDP to 128kbps CBR without DTX dropouts, replace crushing 12:1 compressor with high-headroom soft limiter, sync booster setSinkId, and add Microphone Input Volume preamp gain slider"
+  "updatedAt": "2026-11-24T11:00:00.000Z",
+  "releaseNotes": "Fix automatic voice disconnection and keepalive stability: disable Chromium background timer throttling for in-game voice reliability, implement seamless voice auto-rejoin on transient socket reconnection with a 20s grace period, add signaling keep-alive pings to prevent proxy/NAT idle disconnects, allow 8s grace period for WebRTC transient ICE disconnects, and increase server ping timeout to 60s"
 }

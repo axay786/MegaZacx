@@ -18,6 +18,7 @@ app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-breakpad');
 app.commandLine.appendSwitch('disable-speech-api');
 app.commandLine.appendSwitch('disable-renderer-accessibility');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -138,7 +139,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       spellcheck: false
     }
   });
