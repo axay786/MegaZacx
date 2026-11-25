@@ -1,7 +1,7 @@
 {
   "version": "1.0.11",
-  "commit": "HEAD",
+  "commit": "d24700940a8d2af41937ee662bede387f2282b9f",
   "name": "MegaZacx",
-  "updatedAt": "2026-11-24T11:00:00.000Z",
-  "releaseNotes": "Fix automatic voice disconnection and keepalive stability: disable Chromium background timer throttling for in-game voice reliability, implement seamless voice auto-rejoin on transient socket reconnection with a 20s grace period, add signaling keep-alive pings to prevent proxy/NAT idle disconnects, allow 8s grace period for WebRTC transient ICE disconnects, and increase server ping timeout to 60s"
+  "updatedAt": "2026-11-25T11:07:38.732Z",
+  "releaseNotes": "Fix automatic voice disconnection: disable Chromium background timer throttling for in-game voice reliability, add voice keep-alive pings to prevent proxy/NAT idle disconnects, seamless auto-rejoin on reconnection, fix updater stuck on installing update"
 }
