@@ -120,17 +120,39 @@ async function checkForUpdates() {
   }
 }
 
-function downloadFile(url, destPath) {
+function downloadFile(url, destPath, maxSizeBytes = 50 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const get = (targetUrl) => {
-      https.get(targetUrl, { headers: { 'User-Agent': 'MegaZacx-Updater' }, timeout: 30000 }, (res) => {
+      const req = https.get(targetUrl, { headers: { 'User-Agent': 'MegaZacx-Updater' }, timeout: 120000 }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return get(res.headers.location);
         }
         if (res.statusCode !== 200) {
           return reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
         }
+        // Guard: reject if Content-Length exceeds max (e.g. .exe accidentally committed)
+        const contentLength = parseInt(res.headers['content-length'] || '0', 10);
+        if (contentLength > maxSizeBytes) {
+          res.destroy();
+          return reject(new Error(
+            `Update package is too large (${Math.round(contentLength / 1024 / 1024)}MB > ${Math.round(maxSizeBytes / 1024 / 1024)}MB limit). ` +
+            'The repository may contain large binary files. Please contact the developer.'
+          ));
+        }
+        let downloaded = 0;
         const file = fs.createWriteStream(destPath);
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (downloaded > maxSizeBytes) {
+            res.destroy();
+            file.destroy();
+            fs.unlink(destPath, () => {});
+            reject(new Error(
+              `Update package exceeded ${Math.round(maxSizeBytes / 1024 / 1024)}MB size limit during download. ` +
+              'The repository may contain large binary files. Please contact the developer.'
+            ));
+          }
+        });
         res.pipe(file);
         file.on('finish', () => {
           file.close(() => resolve(destPath));
@@ -139,7 +161,12 @@ function downloadFile(url, destPath) {
           fs.unlink(destPath, () => {});
           reject(err);
         });
-      }).on('error', (err) => {
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Download timed out after 120 seconds. Check your internet connection and try again.'));
+      });
+      req.on('error', (err) => {
         fs.unlink(destPath, () => {});
         reject(err);
       });
@@ -236,9 +263,28 @@ async function performUpdate(app) {
       latestSha = commitInfo.sha || '';
     } catch (e) {}
 
-    // Update version.json
+    // Read the real version from the downloaded update's version.json (never hardcode it)
+    let newVersion = '1.0.0';
+    try {
+      const downloadedVersionFile = path.join(extractedAppDir, 'version.json');
+      if (fs.existsSync(downloadedVersionFile)) {
+        const parsed = JSON.parse(fs.readFileSync(downloadedVersionFile, 'utf8'));
+        newVersion = parsed.version || newVersion;
+      } else {
+        // Fallback: read from downloaded package.json
+        const downloadedPkg = path.join(extractedAppDir, 'package.json');
+        if (fs.existsSync(downloadedPkg)) {
+          const pkg = JSON.parse(fs.readFileSync(downloadedPkg, 'utf8'));
+          newVersion = pkg.version || newVersion;
+        }
+      }
+    } catch (e) {
+      console.warn('[Updater] Could not read version from downloaded update:', e.message);
+    }
+
+    // Update version.json with real version from the downloaded release
     const newVersionData = {
-      version: '1.0.2',
+      version: newVersion,
       commit: latestSha || 'latest',
       name: 'MegaZacx',
       updatedAt: new Date().toISOString()

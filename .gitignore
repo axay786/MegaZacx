@@ -1,11 +1,7 @@
 node_modules/
 node_modules
 .cache/
-dist/win-unpacked/
-dist/builder-effective-config.yaml
-dist/builder-debug.yml
+dist/
 *.log
 scratch/
 /data/
-# Allow installer executables so they can be shared via the repo
-!dist/*.exe
